@@ -1,6 +1,6 @@
-# Binarios compilados
-cloudlink
-wapp-cloudlink
+# Binarios compilados (anclados a la raíz para no ignorar cmd/cloudlink/)
+/cloudlink
+/wapp-cloudlink
 *.exe
 *.exe~
 *.test
