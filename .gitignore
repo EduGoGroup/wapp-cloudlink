@@ -1,0 +1,30 @@
+# Binarios compilados
+cloudlink
+wapp-cloudlink
+*.exe
+*.exe~
+*.test
+*.out
+
+# Directorios de salida
+bin/
+dist/
+
+# Entornos y secretos
+.env
+.env.*
+
+# Protobuf generado (opcional: descomentar para no versionar el código generado)
+# internal/pb/
+
+# Vendor (descomentar si se usa go mod vendor)
+# vendor/
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
