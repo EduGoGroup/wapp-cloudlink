@@ -12,9 +12,25 @@ import (
 	"sync"
 
 	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
+	"github.com/EduGoGroup/wapp-cloudlink/internal/enroll"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// Enroller es la dependencia de enrolamiento del servidor (implementada por
+// *enroll.Service). Se inyecta con WithEnroller; si no se inyecta, EnrollEdge
+// responde Unimplemented (modo transporte puro de T2/T3).
+type Enroller interface {
+	Enroll(ctx context.Context, activationCode string, csrPEM []byte) (edgeCertPEM, caChainPEM []byte, tenantID string, err error)
+}
+
+// Option configura el Server en New.
+type Option func(*Server)
+
+// WithEnroller inyecta el servicio de enrolamiento (T4).
+func WithEnroller(e Enroller) Option {
+	return func(s *Server) { s.enroller = e }
+}
 
 // conn envuelve un stream Connect. stream.Send no es seguro para uso
 // concurrente, por eso se serializa con sendMu.
@@ -38,14 +54,21 @@ type Server struct {
 	sessions map[string]*conn
 
 	received chan *cloudlinkv1.EdgeToCloud
+
+	enroller Enroller
 }
 
-// New crea un Server listo para registrar en un *grpc.Server.
-func New() *Server {
-	return &Server{
+// New crea un Server listo para registrar en un *grpc.Server. Sin opciones es el
+// transporte puro (T2/T3); con WithEnroller habilita el enrolamiento real (T4).
+func New(opts ...Option) *Server {
+	s := &Server{
 		sessions: make(map[string]*conn),
 		received: make(chan *cloudlinkv1.EdgeToCloud, 64),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Received expone los eventos edge->cloud recibidos en cualquier sesión.
@@ -95,7 +118,38 @@ func (s *Server) Push(sessionID string, cmd *cloudlinkv1.CloudToEdge) error {
 	return c.send(cmd)
 }
 
-// EnrollEdge es un stub: el enrolamiento real (mTLS, PKI) es T3/T4.
-func (s *Server) EnrollEdge(_ context.Context, _ *cloudlinkv1.EnrollEdgeRequest) (*cloudlinkv1.EnrollEdgeResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "EnrollEdge: enrolamiento real (mTLS/PKI) pendiente en T3/T4")
+// EnrollEdge implementa el enrolamiento por código de un solo uso: valida el
+// código de activación y el CSR, y devuelve el cert de Edge firmado por la CA del
+// tenant. Sobre TLS de servidor (el Edge aún no tiene cert); el cert emitido le
+// permite después abrir Connect con mTLS contra la MISMA CA.
+//
+// Mapeo de errores: código inválido/expirado/usado -> PermissionDenied; CSR
+// ausente o inválido -> InvalidArgument. No se filtran secretos en los mensajes.
+func (s *Server) EnrollEdge(ctx context.Context, req *cloudlinkv1.EnrollEdgeRequest) (*cloudlinkv1.EnrollEdgeResponse, error) {
+	if s.enroller == nil {
+		return nil, status.Error(codes.Unimplemented, "EnrollEdge: enrolamiento no configurado en este servidor")
+	}
+	if len(req.GetCsrPem()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "csr_pem requerido")
+	}
+
+	edgeCertPEM, caChainPEM, tenantID, err := s.enroller.Enroll(ctx, req.GetActivationCode(), req.GetCsrPem())
+	if err != nil {
+		switch {
+		case errors.Is(err, enroll.ErrInvalidCSR):
+			return nil, status.Error(codes.InvalidArgument, "CSR inválido")
+		case errors.Is(err, enroll.ErrCodeNotFound),
+			errors.Is(err, enroll.ErrCodeExpired),
+			errors.Is(err, enroll.ErrCodeUsed):
+			return nil, status.Error(codes.PermissionDenied, "código de activación inválido")
+		default:
+			return nil, status.Error(codes.Internal, "enrolamiento falló")
+		}
+	}
+
+	return &cloudlinkv1.EnrollEdgeResponse{
+		EdgeCertPem: edgeCertPEM,
+		CaChainPem:  caChainPEM,
+		TenantId:    tenantID,
+	}, nil
 }
