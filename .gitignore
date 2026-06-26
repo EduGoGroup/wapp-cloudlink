@@ -1,6 +1,7 @@
 # Binarios compilados (anclados a la raíz para no ignorar cmd/cloudlink/)
 /cloudlink
 /wapp-cloudlink
+/democloud
 *.exe
 *.exe~
 *.test
@@ -14,8 +15,18 @@ dist/
 .env
 .env.*
 
-# Protobuf generado (opcional: descomentar para no versionar el código generado)
-# internal/pb/
+# PKI de desarrollo (mTLS) — NUNCA committear claves ni certs de dev.
+# Los genera scripts/gen-dev-certs.sh; en prod los emite la CA del tenant.
+certs/
+*.key
+*.pem
+
+# Protobuf generado: SE COMMITEA (vive en gen/, importable cross-repo por el Edge).
+# No se ignora a propósito.
+
+# go workspace — SOLO desarrollo local (overlay de wapp-shared sin publicar)
+go.work
+go.work.sum
 
 # Vendor (descomentar si se usa go mod vendor)
 # vendor/

@@ -1,0 +1,20 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  # Excepciones documentadas: el contrato CloudLink usa nombres de dominio, no
+  # las convenciones genéricas de buf:
+  #  - SERVICE_SUFFIX: los servicios se llaman Enrollment y CloudLink (sin
+  #    sufijo "Service"), por legibilidad del contrato Edge↔cloud.
+  #  - RPC_REQUEST_STANDARD_NAME / RPC_RESPONSE_STANDARD_NAME: el stream bidi
+  #    usa EdgeToCloud/CloudToEdge como tipos de request/response (nombres
+  #    direccionales del dominio), no MethodNameRequest/Response.
+  except:
+    - SERVICE_SUFFIX
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE
