@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
-	"github.com/EduGoGroup/wapp-cloudlink/internal/mtls"
+	"github.com/EduGoGroup/wapp-cloudlink/mtls"
 	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
 	"google.golang.org/grpc"
 )

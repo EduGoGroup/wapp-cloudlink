@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EduGoGroup/wapp-cloudlink/internal/client"
-	"github.com/EduGoGroup/wapp-cloudlink/internal/mtls"
+	"github.com/EduGoGroup/wapp-cloudlink/client"
+	"github.com/EduGoGroup/wapp-cloudlink/mtls"
 	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
 	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
 	"google.golang.org/grpc"
