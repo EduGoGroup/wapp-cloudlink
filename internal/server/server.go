@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
 	"github.com/EduGoGroup/wapp-cloudlink/internal/enroll"
@@ -30,6 +31,29 @@ type Option func(*Server)
 // WithEnroller inyecta el servicio de enrolamiento (T4).
 func WithEnroller(e Enroller) Option {
 	return func(s *Server) { s.enroller = e }
+}
+
+// LeaseIssuer es la dependencia de emisión de leases (implementada por
+// *lease.Issuer). Se inyecta con WithLeaseRenewal para habilitar la renovación
+// automática del lease al recibir un Heartbeat (T5). Mantiene server desacoplado
+// del paquete lease.
+type LeaseIssuer interface {
+	Issue(edgeID, tenantID string, ttl time.Duration, counter int64) (*cloudlinkv1.LeaseUpdate, error)
+}
+
+// WithLeaseRenewal habilita la renovación del lease anclada al Heartbeat: cuando
+// llega un Heartbeat con lease_counter=N, el servidor emite un lease renovado con
+// counter=N+1 válido por ttl y lo empuja por el mismo stream. Sin esta opción el
+// servidor no auto-renueva (la revocación/emisión manual sigue disponible vía
+// PushLease).
+//
+// Granularidad por-Edge (v1): el edgeID se deriva del session_id observado en el
+// stream (placeholder; la identidad real del Edge vendrá del cert mTLS en T6).
+func WithLeaseRenewal(issuer LeaseIssuer, ttl time.Duration) Option {
+	return func(s *Server) {
+		s.leaseIssuer = issuer
+		s.leaseTTL = ttl
+	}
 }
 
 // conn envuelve un stream Connect. stream.Send no es seguro para uso
@@ -56,6 +80,9 @@ type Server struct {
 	received chan *cloudlinkv1.EdgeToCloud
 
 	enroller Enroller
+
+	leaseIssuer LeaseIssuer
+	leaseTTL    time.Duration
 }
 
 // New crea un Server listo para registrar en un *grpc.Server. Sin opciones es el
@@ -91,6 +118,7 @@ func (s *Server) Connect(stream cloudlinkv1.CloudLink_ConnectServer) error {
 		}
 		if sid := msg.GetSessionId(); sid != "" {
 			s.register(sid, c)
+			s.maybeRenewLease(sid, msg, c)
 		}
 		select {
 		case s.received <- msg:
@@ -98,6 +126,40 @@ func (s *Server) Connect(stream cloudlinkv1.CloudLink_ConnectServer) error {
 			return ctx.Err()
 		}
 	}
+}
+
+// maybeRenewLease emite y empuja un lease renovado cuando llega un Heartbeat y
+// hay un LeaseIssuer inyectado. El counter renovado es lease_counter+1
+// (monótono; el Validator del Edge rechaza counters viejos). Errores de emisión
+// o envío se ignoran a propósito: la renovación es best-effort sobre el stream;
+// el lease vigente sigue valiendo hasta su expiración y el Edge reintentará en
+// el próximo heartbeat.
+func (s *Server) maybeRenewLease(sessionID string, msg *cloudlinkv1.EdgeToCloud, c *conn) {
+	if s.leaseIssuer == nil {
+		return
+	}
+	hb := msg.GetHeartbeat()
+	if hb == nil {
+		return
+	}
+	lu, err := s.leaseIssuer.Issue(sessionID, "", s.leaseTTL, hb.GetLeaseCounter()+1)
+	if err != nil {
+		return
+	}
+	_ = c.send(&cloudlinkv1.CloudToEdge{
+		SessionId: sessionID,
+		Payload:   &cloudlinkv1.CloudToEdge_LeaseUpdate{LeaseUpdate: lu},
+	})
+}
+
+// PushLease empuja un LeaseUpdate (renovación o revocación/kill-switch) a una
+// sesión registrada. Envoltura sobre Push para el caso lease. La revocación
+// anti-clon se dispara llamando PushLease con un LeaseUpdate revocado.
+func (s *Server) PushLease(sessionID string, lu *cloudlinkv1.LeaseUpdate) error {
+	return s.Push(sessionID, &cloudlinkv1.CloudToEdge{
+		SessionId: sessionID,
+		Payload:   &cloudlinkv1.CloudToEdge_LeaseUpdate{LeaseUpdate: lu},
+	})
 }
 
 func (s *Server) register(sessionID string, c *conn) {

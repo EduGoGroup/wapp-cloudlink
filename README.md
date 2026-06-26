@@ -66,6 +66,46 @@ Genera en `certs/`: `ca.crt`/`ca.key`, `server.crt`/`server.key`
 emite la CA del tenant vía el flujo de enrolamiento. El binario `cmd/cloudlink`
 arranca con mTLS si halla los certs en `certs/`, y sin TLS si no (solo dev).
 
+## Lease operativo / kill-switch (ADR-0007)
+
+El **lease** autoriza al Edge a operar y es revocable de forma remota
+(kill-switch anti-clon). Vive en `internal/lease` (`Issuer` lado servidor,
+`Validator` lado Edge —este último modelado aquí; su cableado real en el daemon
+es T6).
+
+| Decisión (v1) | Detalle |
+|---|---|
+| Firma | **Ed25519**: el servidor firma; el Edge solo tiene la clave pública |
+| Fuente de verdad | El **payload firmado** dentro de `LeaseUpdate.lease`. Los campos `expires_unix`/`revoked` solo lo **espejan** (inspección); el Validator nunca confía en ellos sin verificar la firma |
+| Granularidad | **Por-Edge** (kill-switch de todo el Edge). `session_id` queda **reservado** para granularidad por-sesión futura (no implementado) |
+| Gate 2-de-2 | `CanOperate = hasDEK ∧ leaseVigente` (firma válida ∧ no expirado ∧ no revocado). La DEK vive en el Edge; aquí se modela como booleano inyectado |
+| Margen offline | Sin gracia extra: vale hasta `expires_unix`. El `Heartbeat.lease_counter` ancla la renovación; el Validator exige counter **estrictamente creciente** (anti-replay) |
+| Revocación | **Pegajosa**: una vez revocado, ningún lease viejo —ni uno vigente posterior— des-revoca en v1 |
+
+### Encoding del payload firmado
+
+El blob de `LeaseUpdate.lease` es un sobre JSON `{claims, sig}` donde `claims`
+son los bytes JSON **exactos** que se firman y `sig = ed25519.Sign(priv,
+claims)`. Se firma y se verifica sobre **los mismos bytes embebidos** (no se
+re-serializa antes de verificar), por lo que **no** se requiere un encoding
+canónico/determinista. Es stdlib puro (`encoding/json` + `crypto/ed25519`), sin
+dependencias nuevas. Se evitó un sub-mensaje proto a propósito: el `.proto` no
+se toca en T5 y proto3 no garantiza serialización byte-estable.
+
+### Emisión desde el servidor
+
+`server.New()` se mantiene retrocompatible (opciones aditivas, como `WithEnroller`):
+
+- `server.WithLeaseRenewal(issuer, ttl)` — al recibir un `Heartbeat` con
+  `lease_counter=N`, el servidor emite un lease renovado (`counter=N+1`) válido
+  por `ttl` y lo empuja por el mismo stream (best-effort).
+- `server.PushLease(sessionID, *LeaseUpdate)` — empuja un lease arbitrario
+  (renovación o **revocación**). El kill-switch se dispara con un `LeaseUpdate`
+  revocado producido por `Issuer.Revoke`.
+
+> El `edgeID` se deriva hoy del `session_id` observado (placeholder); la
+> identidad real del Edge vendrá del cert mTLS en T6.
+
 ## Estado
 
 **Greenfield.** Solo scaffold inicial. Ver `CLAUDE.md` para contexto
