@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/EduGoGroup/wapp-cloudlink/client"
-	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
 	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
+	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"

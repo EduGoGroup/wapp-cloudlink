@@ -78,7 +78,7 @@ func tailCommands(srv *server.Server, path string) {
 	if err != nil {
 		log.Fatalf("democloud: abrir cmd-file %q: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Seek(0, io.SeekEnd); err != nil {
 		log.Fatalf("democloud: seek cmd-file: %v", err)
 	}

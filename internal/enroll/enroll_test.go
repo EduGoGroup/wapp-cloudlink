@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
 	"github.com/EduGoGroup/wapp-cloudlink/client"
+	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
 	"github.com/EduGoGroup/wapp-cloudlink/internal/enroll"
-	"github.com/EduGoGroup/wapp-cloudlink/mtls"
 	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
+	"github.com/EduGoGroup/wapp-cloudlink/mtls"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
