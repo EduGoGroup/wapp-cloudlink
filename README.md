@@ -25,6 +25,15 @@ sobre gRPC bidi-stream con mTLS. Por aquí viajan órdenes de despacho
 | Multiplexado | Por `session_id` (un Edge gestiona N teléfonos) |
 | Resiliencia | Backoff exponencial en el Edge + `outbox` SQLite |
 
+## Código generado
+
+El código protobuf/gRPC generado **se commitea** y vive en
+`gen/wapp/cloudlink/v1` (paquete `cloudlinkv1`) — **nunca** bajo `internal/`.
+Motivo: el Edge debe importar el cliente generado **cross-repo**, y los paquetes
+`internal/` son inimportables fuera del módulo. La generación es reproducible
+con `buf generate` (config en `buf.gen.yaml`, sin managed mode: el `go_package`
+se declara explícito en el `.proto`).
+
 ## Cómo correrá (placeholder)
 
 ```bash

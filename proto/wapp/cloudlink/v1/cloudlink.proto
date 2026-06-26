@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package wapp.cloudlink.v1;
+
+option go_package = "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1;cloudlinkv1";
+
+// Enrollment: enrolamiento por código de un solo uso. Unario, sobre TLS de
+// servidor (el Edge aún no tiene cert). El Edge envía su CSR y recibe el
+// certificado de Edge/tenant con el que después abrirá el stream con mTLS.
+service Enrollment {
+  rpc EnrollEdge(EnrollEdgeRequest) returns (EnrollEdgeResponse);
+}
+
+message EnrollEdgeRequest {
+  string activation_code = 1;
+  bytes csr_pem = 2;
+}
+
+message EnrollEdgeResponse {
+  bytes edge_cert_pem = 1;
+  bytes ca_chain_pem = 2;
+  string tenant_id = 3;
+}
+
+// CloudLink: único canal Edge<->cloud. Stream bidireccional persistente con
+// mTLS. La nube empuja comandos (CloudToEdge) y el Edge emite eventos/estados
+// (EdgeToCloud). Multiplexado por session_id; correlación por command_id.
+service CloudLink {
+  rpc Connect(stream EdgeToCloud) returns (stream CloudToEdge);
+}
+
+// Comandos cloud -> edge.
+message CloudToEdge {
+  string command_id = 1;
+  string session_id = 2;
+  oneof payload {
+    SendText send_text = 10;
+    SendMedia send_media = 11;
+    RunFlowStep run_flow_step = 12;
+    LeaseUpdate lease_update = 13;
+    Ping ping = 14;
+  }
+}
+
+// Eventos/estados edge -> cloud.
+message EdgeToCloud {
+  string command_id = 1;
+  string session_id = 2;
+  oneof payload {
+    IncomingMessage incoming = 10;
+    DeliveryStatus delivery = 11;
+    Ack ack = 12;
+    Heartbeat heartbeat = 13;
+    Pong pong = 14;
+  }
+}
+
+message SendText {
+  string to = 1;
+  string text = 2;
+}
+
+message SendMedia {
+  string to = 1;
+  string caption = 2;
+  string mime = 3;
+  oneof src {
+    bytes inline = 10;
+    string presigned_url = 11;
+  }
+}
+
+message RunFlowStep {
+  bytes payload = 1;
+}
+
+message LeaseUpdate {
+  bytes lease = 1;
+  int64 expires_unix = 2;
+  bool revoked = 3;
+}
+
+message Ping {
+  int64 nonce = 1;
+}
+
+message IncomingMessage {
+  string from = 1;
+  string text = 2;
+  int64 ts_unix = 3;
+  string wa_message_id = 4;
+  bool is_group = 5;
+}
+
+message DeliveryStatus {
+  string wa_message_id = 1;
+  string status = 2;
+}
+
+message Ack {
+  string acked_command_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message Heartbeat {
+  int64 lease_counter = 1;
+}
+
+message Pong {
+  int64 nonce = 1;
+}

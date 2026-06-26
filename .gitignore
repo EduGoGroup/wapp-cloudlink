@@ -14,8 +14,12 @@ dist/
 .env
 .env.*
 
-# Protobuf generado (opcional: descomentar para no versionar el código generado)
-# internal/pb/
+# Protobuf generado: SE COMMITEA (vive en gen/, importable cross-repo por el Edge).
+# No se ignora a propósito.
+
+# go workspace — SOLO desarrollo local (overlay de wapp-shared sin publicar)
+go.work
+go.work.sum
 
 # Vendor (descomentar si se usa go mod vendor)
 # vendor/
