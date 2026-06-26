@@ -44,6 +44,28 @@ go build -o bin/cloudlink ./cmd/cloudlink
 # protoc --go_out=. --go-grpc_out=. proto/cloudlink.proto
 ```
 
+## PKI de desarrollo / mTLS
+
+El canal `CloudLink.Connect` usa **mTLS**: cert por Edge firmado por la CA de la
+plataforma/tenant (en dev, una CA local). Las transport-credentials viven en
+`internal/mtls` (`ServerCreds` / `ClientCreds`); es un concern de transporte a
+nivel de `grpc.NewServer`/`grpc.NewClient`, fuera de la lógica de `server.New()`.
+
+Para generar la PKI local (CA + cert de servidor + cert de Edge):
+
+```bash
+./scripts/gen-dev-certs.sh                  # CN de Edge: edge-dev-001
+EDGE_CN=edge-acme-7 ./scripts/gen-dev-certs.sh
+```
+
+Genera en `certs/`: `ca.crt`/`ca.key`, `server.crt`/`server.key`
+(SAN `localhost`/`127.0.0.1`) y `edge.crt`/`edge.key`. El script es idempotente.
+
+**`certs/` y todo material privado (`*.key`, `*.pem`) están fuera de git** y
+**nunca** se committean (ver `.gitignore`). En producción los certs de Edge los
+emite la CA del tenant vía el flujo de enrolamiento. El binario `cmd/cloudlink`
+arranca con mTLS si halla los certs en `certs/`, y sin TLS si no (solo dev).
+
 ## Estado
 
 **Greenfield.** Solo scaffold inicial. Ver `CLAUDE.md` para contexto

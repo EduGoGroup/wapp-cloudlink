@@ -14,6 +14,12 @@ dist/
 .env
 .env.*
 
+# PKI de desarrollo (mTLS) — NUNCA committear claves ni certs de dev.
+# Los genera scripts/gen-dev-certs.sh; en prod los emite la CA del tenant.
+certs/
+*.key
+*.pem
+
 # Protobuf generado: SE COMMITEA (vive en gen/, importable cross-repo por el Edge).
 # No se ignora a propósito.
 
