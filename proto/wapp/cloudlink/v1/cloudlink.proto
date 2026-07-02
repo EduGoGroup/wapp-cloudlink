@@ -53,6 +53,7 @@ message EdgeToCloud {
     Ack ack = 12;
     Heartbeat heartbeat = 13;
     Pong pong = 14;
+    MessageReceipt receipt = 15;
   }
 }
 
@@ -110,6 +111,25 @@ message SensitivePayload {
 message DeliveryStatus {
   string wa_message_id = 1;
   string status = 2;
+}
+
+// Acuse de estado de un saliente (delivered/read). Aditivo (Plan 013): sube por
+// el stream EdgeToCloud correlacionado con el command_id del SendText original.
+// Higiene zero-knowledge: SOLO IDs/estado/timestamp/session/command_id; NUNCA
+// texto, número de teléfono, JID ni contenido.
+message MessageReceipt {
+  string session_id = 1; // sesión del Edge (multiplexado)
+  repeated string message_ids = 2; // los MessageIDs acusados (metadato, no PII)
+  ReceiptStatus status = 3; // DELIVERED | READ
+  int64 timestamp = 4; // epoch del receipt (types.Receipt.Timestamp)
+  string command_id = 5; // correlación con el SendText original (opaco, no PII)
+}
+
+// Estado de acuse de un mensaje saliente.
+enum ReceiptStatus {
+  RECEIPT_STATUS_UNSPECIFIED = 0;
+  RECEIPT_STATUS_DELIVERED = 1; // ✓✓ entregado
+  RECEIPT_STATUS_READ = 2; // ✓✓ azul leído
 }
 
 message Ack {

@@ -21,6 +21,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Estado de acuse de un mensaje saliente.
+type ReceiptStatus int32
+
+const (
+	ReceiptStatus_RECEIPT_STATUS_UNSPECIFIED ReceiptStatus = 0
+	ReceiptStatus_RECEIPT_STATUS_DELIVERED   ReceiptStatus = 1 // ✓✓ entregado
+	ReceiptStatus_RECEIPT_STATUS_READ        ReceiptStatus = 2 // ✓✓ azul leído
+)
+
+// Enum value maps for ReceiptStatus.
+var (
+	ReceiptStatus_name = map[int32]string{
+		0: "RECEIPT_STATUS_UNSPECIFIED",
+		1: "RECEIPT_STATUS_DELIVERED",
+		2: "RECEIPT_STATUS_READ",
+	}
+	ReceiptStatus_value = map[string]int32{
+		"RECEIPT_STATUS_UNSPECIFIED": 0,
+		"RECEIPT_STATUS_DELIVERED":   1,
+		"RECEIPT_STATUS_READ":        2,
+	}
+)
+
+func (x ReceiptStatus) Enum() *ReceiptStatus {
+	p := new(ReceiptStatus)
+	*p = x
+	return p
+}
+
+func (x ReceiptStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReceiptStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[0].Descriptor()
+}
+
+func (ReceiptStatus) Type() protoreflect.EnumType {
+	return &file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[0]
+}
+
+func (x ReceiptStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReceiptStatus.Descriptor instead.
+func (ReceiptStatus) EnumDescriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{0}
+}
+
 type EnrollEdgeRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ActivationCode string                 `protobuf:"bytes,1,opt,name=activation_code,json=activationCode,proto3" json:"activation_code,omitempty"`
@@ -300,6 +350,7 @@ type EdgeToCloud struct {
 	//	*EdgeToCloud_Ack
 	//	*EdgeToCloud_Heartbeat
 	//	*EdgeToCloud_Pong
+	//	*EdgeToCloud_Receipt
 	Payload       isEdgeToCloud_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -401,6 +452,15 @@ func (x *EdgeToCloud) GetPong() *Pong {
 	return nil
 }
 
+func (x *EdgeToCloud) GetReceipt() *MessageReceipt {
+	if x != nil {
+		if x, ok := x.Payload.(*EdgeToCloud_Receipt); ok {
+			return x.Receipt
+		}
+	}
+	return nil
+}
+
 type isEdgeToCloud_Payload interface {
 	isEdgeToCloud_Payload()
 }
@@ -425,6 +485,10 @@ type EdgeToCloud_Pong struct {
 	Pong *Pong `protobuf:"bytes,14,opt,name=pong,proto3,oneof"`
 }
 
+type EdgeToCloud_Receipt struct {
+	Receipt *MessageReceipt `protobuf:"bytes,15,opt,name=receipt,proto3,oneof"`
+}
+
 func (*EdgeToCloud_Incoming) isEdgeToCloud_Payload() {}
 
 func (*EdgeToCloud_Delivery) isEdgeToCloud_Payload() {}
@@ -434,6 +498,8 @@ func (*EdgeToCloud_Ack) isEdgeToCloud_Payload() {}
 func (*EdgeToCloud_Heartbeat) isEdgeToCloud_Payload() {}
 
 func (*EdgeToCloud_Pong) isEdgeToCloud_Payload() {}
+
+func (*EdgeToCloud_Receipt) isEdgeToCloud_Payload() {}
 
 type SendText struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -979,6 +1045,86 @@ func (x *DeliveryStatus) GetStatus() string {
 	return ""
 }
 
+// Acuse de estado de un saliente (delivered/read). Aditivo (Plan 013): sube por
+// el stream EdgeToCloud correlacionado con el command_id del SendText original.
+// Higiene zero-knowledge: SOLO IDs/estado/timestamp/session/command_id; NUNCA
+// texto, número de teléfono, JID ni contenido.
+type MessageReceipt struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                // sesión del Edge (multiplexado)
+	MessageIds    []string               `protobuf:"bytes,2,rep,name=message_ids,json=messageIds,proto3" json:"message_ids,omitempty"`             // los MessageIDs acusados (metadato, no PII)
+	Status        ReceiptStatus          `protobuf:"varint,3,opt,name=status,proto3,enum=wapp.cloudlink.v1.ReceiptStatus" json:"status,omitempty"` // DELIVERED | READ
+	Timestamp     int64                  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                // epoch del receipt (types.Receipt.Timestamp)
+	CommandId     string                 `protobuf:"bytes,5,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`                // correlación con el SendText original (opaco, no PII)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessageReceipt) Reset() {
+	*x = MessageReceipt{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageReceipt) ProtoMessage() {}
+
+func (x *MessageReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageReceipt.ProtoReflect.Descriptor instead.
+func (*MessageReceipt) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *MessageReceipt) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *MessageReceipt) GetMessageIds() []string {
+	if x != nil {
+		return x.MessageIds
+	}
+	return nil
+}
+
+func (x *MessageReceipt) GetStatus() ReceiptStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ReceiptStatus_RECEIPT_STATUS_UNSPECIFIED
+}
+
+func (x *MessageReceipt) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *MessageReceipt) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
 type Ack struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	AckedCommandId string                 `protobuf:"bytes,1,opt,name=acked_command_id,json=ackedCommandId,proto3" json:"acked_command_id,omitempty"`
@@ -990,7 +1136,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[12]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1002,7 +1148,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[12]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1015,7 +1161,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{12}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Ack) GetAckedCommandId() string {
@@ -1048,7 +1194,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[13]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1060,7 +1206,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[13]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1073,7 +1219,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{13}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Heartbeat) GetLeaseCounter() int64 {
@@ -1092,7 +1238,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[14]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1104,7 +1250,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[14]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1117,7 +1263,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{14}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Pong) GetNonce() int64 {
@@ -1153,7 +1299,7 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\rrun_flow_step\x18\f \x01(\v2\x1e.wapp.cloudlink.v1.RunFlowStepH\x00R\vrunFlowStep\x12C\n" +
 	"\flease_update\x18\r \x01(\v2\x1e.wapp.cloudlink.v1.LeaseUpdateH\x00R\vleaseUpdate\x12-\n" +
 	"\x04ping\x18\x0e \x01(\v2\x17.wapp.cloudlink.v1.PingH\x00R\x04pingB\t\n" +
-	"\apayload\"\xf2\x02\n" +
+	"\apayload\"\xb1\x03\n" +
 	"\vEdgeToCloud\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
@@ -1164,7 +1310,8 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\bdelivery\x18\v \x01(\v2!.wapp.cloudlink.v1.DeliveryStatusH\x00R\bdelivery\x12*\n" +
 	"\x03ack\x18\f \x01(\v2\x16.wapp.cloudlink.v1.AckH\x00R\x03ack\x12<\n" +
 	"\theartbeat\x18\r \x01(\v2\x1c.wapp.cloudlink.v1.HeartbeatH\x00R\theartbeat\x12-\n" +
-	"\x04pong\x18\x0e \x01(\v2\x17.wapp.cloudlink.v1.PongH\x00R\x04pongB\t\n" +
+	"\x04pong\x18\x0e \x01(\v2\x17.wapp.cloudlink.v1.PongH\x00R\x04pong\x12=\n" +
+	"\areceipt\x18\x0f \x01(\v2!.wapp.cloudlink.v1.MessageReceiptH\x00R\areceiptB\t\n" +
 	"\apayload\".\n" +
 	"\bSendText\x12\x0e\n" +
 	"\x02to\x18\x01 \x01(\tR\x02to\x12\x12\n" +
@@ -1205,7 +1352,16 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\bfrom_lid\x18\x04 \x01(\tR\afromLid\"L\n" +
 	"\x0eDeliveryStatus\x12\"\n" +
 	"\rwa_message_id\x18\x01 \x01(\tR\vwaMessageId\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\"U\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\"\xc7\x01\n" +
+	"\x0eMessageReceipt\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1f\n" +
+	"\vmessage_ids\x18\x02 \x03(\tR\n" +
+	"messageIds\x128\n" +
+	"\x06status\x18\x03 \x01(\x0e2 .wapp.cloudlink.v1.ReceiptStatusR\x06status\x12\x1c\n" +
+	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x05 \x01(\tR\tcommandId\"U\n" +
 	"\x03Ack\x12(\n" +
 	"\x10acked_command_id\x18\x01 \x01(\tR\x0eackedCommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
@@ -1213,7 +1369,11 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\tHeartbeat\x12#\n" +
 	"\rlease_counter\x18\x01 \x01(\x03R\fleaseCounter\"\x1c\n" +
 	"\x04Pong\x12\x14\n" +
-	"\x05nonce\x18\x01 \x01(\x03R\x05nonce2g\n" +
+	"\x05nonce\x18\x01 \x01(\x03R\x05nonce*f\n" +
+	"\rReceiptStatus\x12\x1e\n" +
+	"\x1aRECEIPT_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18RECEIPT_STATUS_DELIVERED\x10\x01\x12\x17\n" +
+	"\x13RECEIPT_STATUS_READ\x10\x022g\n" +
 	"\n" +
 	"Enrollment\x12Y\n" +
 	"\n" +
@@ -1233,44 +1393,49 @@ func file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP() []byte {
 	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescData
 }
 
-var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_wapp_cloudlink_v1_cloudlink_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
-	(*EnrollEdgeRequest)(nil),  // 0: wapp.cloudlink.v1.EnrollEdgeRequest
-	(*EnrollEdgeResponse)(nil), // 1: wapp.cloudlink.v1.EnrollEdgeResponse
-	(*CloudToEdge)(nil),        // 2: wapp.cloudlink.v1.CloudToEdge
-	(*EdgeToCloud)(nil),        // 3: wapp.cloudlink.v1.EdgeToCloud
-	(*SendText)(nil),           // 4: wapp.cloudlink.v1.SendText
-	(*SendMedia)(nil),          // 5: wapp.cloudlink.v1.SendMedia
-	(*RunFlowStep)(nil),        // 6: wapp.cloudlink.v1.RunFlowStep
-	(*LeaseUpdate)(nil),        // 7: wapp.cloudlink.v1.LeaseUpdate
-	(*Ping)(nil),               // 8: wapp.cloudlink.v1.Ping
-	(*IncomingMessage)(nil),    // 9: wapp.cloudlink.v1.IncomingMessage
-	(*SensitivePayload)(nil),   // 10: wapp.cloudlink.v1.SensitivePayload
-	(*DeliveryStatus)(nil),     // 11: wapp.cloudlink.v1.DeliveryStatus
-	(*Ack)(nil),                // 12: wapp.cloudlink.v1.Ack
-	(*Heartbeat)(nil),          // 13: wapp.cloudlink.v1.Heartbeat
-	(*Pong)(nil),               // 14: wapp.cloudlink.v1.Pong
+	(ReceiptStatus)(0),         // 0: wapp.cloudlink.v1.ReceiptStatus
+	(*EnrollEdgeRequest)(nil),  // 1: wapp.cloudlink.v1.EnrollEdgeRequest
+	(*EnrollEdgeResponse)(nil), // 2: wapp.cloudlink.v1.EnrollEdgeResponse
+	(*CloudToEdge)(nil),        // 3: wapp.cloudlink.v1.CloudToEdge
+	(*EdgeToCloud)(nil),        // 4: wapp.cloudlink.v1.EdgeToCloud
+	(*SendText)(nil),           // 5: wapp.cloudlink.v1.SendText
+	(*SendMedia)(nil),          // 6: wapp.cloudlink.v1.SendMedia
+	(*RunFlowStep)(nil),        // 7: wapp.cloudlink.v1.RunFlowStep
+	(*LeaseUpdate)(nil),        // 8: wapp.cloudlink.v1.LeaseUpdate
+	(*Ping)(nil),               // 9: wapp.cloudlink.v1.Ping
+	(*IncomingMessage)(nil),    // 10: wapp.cloudlink.v1.IncomingMessage
+	(*SensitivePayload)(nil),   // 11: wapp.cloudlink.v1.SensitivePayload
+	(*DeliveryStatus)(nil),     // 12: wapp.cloudlink.v1.DeliveryStatus
+	(*MessageReceipt)(nil),     // 13: wapp.cloudlink.v1.MessageReceipt
+	(*Ack)(nil),                // 14: wapp.cloudlink.v1.Ack
+	(*Heartbeat)(nil),          // 15: wapp.cloudlink.v1.Heartbeat
+	(*Pong)(nil),               // 16: wapp.cloudlink.v1.Pong
 }
 var file_wapp_cloudlink_v1_cloudlink_proto_depIdxs = []int32{
-	4,  // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
-	5,  // 1: wapp.cloudlink.v1.CloudToEdge.send_media:type_name -> wapp.cloudlink.v1.SendMedia
-	6,  // 2: wapp.cloudlink.v1.CloudToEdge.run_flow_step:type_name -> wapp.cloudlink.v1.RunFlowStep
-	7,  // 3: wapp.cloudlink.v1.CloudToEdge.lease_update:type_name -> wapp.cloudlink.v1.LeaseUpdate
-	8,  // 4: wapp.cloudlink.v1.CloudToEdge.ping:type_name -> wapp.cloudlink.v1.Ping
-	9,  // 5: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
-	11, // 6: wapp.cloudlink.v1.EdgeToCloud.delivery:type_name -> wapp.cloudlink.v1.DeliveryStatus
-	12, // 7: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
-	13, // 8: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
-	14, // 9: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
-	0,  // 10: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
-	3,  // 11: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
-	1,  // 12: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
-	2,  // 13: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
-	12, // [12:14] is the sub-list for method output_type
-	10, // [10:12] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	5,  // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
+	6,  // 1: wapp.cloudlink.v1.CloudToEdge.send_media:type_name -> wapp.cloudlink.v1.SendMedia
+	7,  // 2: wapp.cloudlink.v1.CloudToEdge.run_flow_step:type_name -> wapp.cloudlink.v1.RunFlowStep
+	8,  // 3: wapp.cloudlink.v1.CloudToEdge.lease_update:type_name -> wapp.cloudlink.v1.LeaseUpdate
+	9,  // 4: wapp.cloudlink.v1.CloudToEdge.ping:type_name -> wapp.cloudlink.v1.Ping
+	10, // 5: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
+	12, // 6: wapp.cloudlink.v1.EdgeToCloud.delivery:type_name -> wapp.cloudlink.v1.DeliveryStatus
+	14, // 7: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
+	15, // 8: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
+	16, // 9: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
+	13, // 10: wapp.cloudlink.v1.EdgeToCloud.receipt:type_name -> wapp.cloudlink.v1.MessageReceipt
+	0,  // 11: wapp.cloudlink.v1.MessageReceipt.status:type_name -> wapp.cloudlink.v1.ReceiptStatus
+	1,  // 12: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
+	4,  // 13: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
+	2,  // 14: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
+	3,  // 15: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
+	14, // [14:16] is the sub-list for method output_type
+	12, // [12:14] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_wapp_cloudlink_v1_cloudlink_proto_init() }
@@ -1291,6 +1456,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 		(*EdgeToCloud_Ack)(nil),
 		(*EdgeToCloud_Heartbeat)(nil),
 		(*EdgeToCloud_Pong)(nil),
+		(*EdgeToCloud_Receipt)(nil),
 	}
 	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[5].OneofWrappers = []any{
 		(*SendMedia_Inline)(nil),
@@ -1301,13 +1467,14 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc), len(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   15,
+			NumEnums:      1,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
 		GoTypes:           file_wapp_cloudlink_v1_cloudlink_proto_goTypes,
 		DependencyIndexes: file_wapp_cloudlink_v1_cloudlink_proto_depIdxs,
+		EnumInfos:         file_wapp_cloudlink_v1_cloudlink_proto_enumTypes,
 		MessageInfos:      file_wapp_cloudlink_v1_cloudlink_proto_msgTypes,
 	}.Build()
 	File_wapp_cloudlink_v1_cloudlink_proto = out.File
