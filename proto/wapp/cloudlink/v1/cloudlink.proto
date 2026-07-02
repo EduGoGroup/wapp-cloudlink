@@ -20,6 +20,7 @@ message EnrollEdgeResponse {
   bytes edge_cert_pem = 1;
   bytes ca_chain_pem = 2;
   string tenant_id = 3;
+  bytes cloud_enc_pubkey = 4; // pública X25519 (32B) de cifrado de la nube, para que el Edge selle los campos sensibles
 }
 
 // CloudLink: único canal Edge<->cloud. Stream bidireccional persistente con
@@ -94,6 +95,16 @@ message IncomingMessage {
   string from_pn = 7; // número real (E.164 sin '+') si se conoce
   string from_lid = 8; // LID si se conoce
   string addressing_mode = 9; // "pn" | "lid" (diagnóstico)
+  bytes enc_payload = 10; // sellado X25519 (SealFor) de un SensitivePayload marshalado, cuando está presente; si va, los planos sensibles (text/push_name/from_pn/from_lid) viajan vacíos
+}
+
+// Sub-payload de los campos sensibles de IncomingMessage. El Edge lo marshala y
+// lo sella (SealFor) hacia enc_payload; la nube lo abre y lo desmarshala.
+message SensitivePayload {
+  string text = 1;
+  string push_name = 2;
+  string from_pn = 3;
+  string from_lid = 4;
 }
 
 message DeliveryStatus {
