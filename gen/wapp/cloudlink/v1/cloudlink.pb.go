@@ -734,14 +734,18 @@ func (x *Ping) GetNonce() int64 {
 }
 
 type IncomingMessage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
-	TsUnix        int64                  `protobuf:"varint,3,opt,name=ts_unix,json=tsUnix,proto3" json:"ts_unix,omitempty"`
-	WaMessageId   string                 `protobuf:"bytes,4,opt,name=wa_message_id,json=waMessageId,proto3" json:"wa_message_id,omitempty"`
-	IsGroup       bool                   `protobuf:"varint,5,opt,name=is_group,json=isGroup,proto3" json:"is_group,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	From           string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
+	Text           string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	TsUnix         int64                  `protobuf:"varint,3,opt,name=ts_unix,json=tsUnix,proto3" json:"ts_unix,omitempty"`
+	WaMessageId    string                 `protobuf:"bytes,4,opt,name=wa_message_id,json=waMessageId,proto3" json:"wa_message_id,omitempty"`
+	IsGroup        bool                   `protobuf:"varint,5,opt,name=is_group,json=isGroup,proto3" json:"is_group,omitempty"`
+	PushName       string                 `protobuf:"bytes,6,opt,name=push_name,json=pushName,proto3" json:"push_name,omitempty"`                   // nombre visible del remitente (dato de negocio)
+	FromPn         string                 `protobuf:"bytes,7,opt,name=from_pn,json=fromPn,proto3" json:"from_pn,omitempty"`                         // número real (E.164 sin '+') si se conoce
+	FromLid        string                 `protobuf:"bytes,8,opt,name=from_lid,json=fromLid,proto3" json:"from_lid,omitempty"`                      // LID si se conoce
+	AddressingMode string                 `protobuf:"bytes,9,opt,name=addressing_mode,json=addressingMode,proto3" json:"addressing_mode,omitempty"` // "pn" | "lid" (diagnóstico)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *IncomingMessage) Reset() {
@@ -807,6 +811,34 @@ func (x *IncomingMessage) GetIsGroup() bool {
 		return x.IsGroup
 	}
 	return false
+}
+
+func (x *IncomingMessage) GetPushName() string {
+	if x != nil {
+		return x.PushName
+	}
+	return ""
+}
+
+func (x *IncomingMessage) GetFromPn() string {
+	if x != nil {
+		return x.FromPn
+	}
+	return ""
+}
+
+func (x *IncomingMessage) GetFromLid() string {
+	if x != nil {
+		return x.FromLid
+	}
+	return ""
+}
+
+func (x *IncomingMessage) GetAddressingMode() string {
+	if x != nil {
+		return x.AddressingMode
+	}
+	return ""
 }
 
 type DeliveryStatus struct {
@@ -1065,13 +1097,17 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\fexpires_unix\x18\x02 \x01(\x03R\vexpiresUnix\x12\x18\n" +
 	"\arevoked\x18\x03 \x01(\bR\arevoked\"\x1c\n" +
 	"\x04Ping\x12\x14\n" +
-	"\x05nonce\x18\x01 \x01(\x03R\x05nonce\"\x91\x01\n" +
+	"\x05nonce\x18\x01 \x01(\x03R\x05nonce\"\x8b\x02\n" +
 	"\x0fIncomingMessage\x12\x12\n" +
 	"\x04from\x18\x01 \x01(\tR\x04from\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x17\n" +
 	"\ats_unix\x18\x03 \x01(\x03R\x06tsUnix\x12\"\n" +
 	"\rwa_message_id\x18\x04 \x01(\tR\vwaMessageId\x12\x19\n" +
-	"\bis_group\x18\x05 \x01(\bR\aisGroup\"L\n" +
+	"\bis_group\x18\x05 \x01(\bR\aisGroup\x12\x1b\n" +
+	"\tpush_name\x18\x06 \x01(\tR\bpushName\x12\x17\n" +
+	"\afrom_pn\x18\a \x01(\tR\x06fromPn\x12\x19\n" +
+	"\bfrom_lid\x18\b \x01(\tR\afromLid\x12'\n" +
+	"\x0faddressing_mode\x18\t \x01(\tR\x0eaddressingMode\"L\n" +
 	"\x0eDeliveryStatus\x12\"\n" +
 	"\rwa_message_id\x18\x01 \x01(\tR\vwaMessageId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\"U\n" +

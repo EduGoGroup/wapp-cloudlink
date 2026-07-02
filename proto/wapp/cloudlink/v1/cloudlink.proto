@@ -90,6 +90,10 @@ message IncomingMessage {
   int64 ts_unix = 3;
   string wa_message_id = 4;
   bool is_group = 5;
+  string push_name = 6; // nombre visible del remitente (dato de negocio)
+  string from_pn = 7; // número real (E.164 sin '+') si se conoce
+  string from_lid = 8; // LID si se conoce
+  string addressing_mode = 9; // "pn" | "lid" (diagnóstico)
 }
 
 message DeliveryStatus {
