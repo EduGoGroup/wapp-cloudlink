@@ -10,7 +10,7 @@
 //
 // Uso:
 //
-//	go run ./cmd/democloud                 # escucha en :8443 (CLOUDLINK_ADDR para cambiar)
+//	go run ./cmd/democloud                 # escucha en :8101 (CLOUDLINK_ADDR para cambiar)
 //	# en stdin, una vez el Edge conectó (verás "sesión registrada"):
 //	send <sessionID> <to> <texto...>       # empuja un SendText a esa sesión
 //	ping <sessionID>                       # empuja un Ping
@@ -37,7 +37,7 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags)
 
-	addr := envOr("CLOUDLINK_ADDR", ":8443")
+	addr := envOr("CLOUDLINK_ADDR", ":8101")
 	srv := server.New()
 
 	gs := grpc.NewServer() // insecure: driver de demo

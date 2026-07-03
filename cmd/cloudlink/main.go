@@ -19,7 +19,7 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	addr := envOr("CLOUDLINK_ADDR", ":8443")
+	addr := envOr("CLOUDLINK_ADDR", ":8101")
 	certDir := envOr("CLOUDLINK_CERT_DIR", "certs")
 
 	var opts []grpc.ServerOption
