@@ -66,10 +66,20 @@ message SendMedia {
   string to = 1;
   string caption = 2;
   string mime = 3;
+  string filename = 4; // nombre del archivo (DocumentMessage.FileName/Title)
+  MediaKind kind = 5; // elige rama DocumentMessage vs ImageMessage (el mime no basta)
   oneof src {
     bytes inline = 10;
     string presigned_url = 11;
   }
+}
+
+// Discriminador del tipo de media a enviar: define qué rama de whatsmeow usa el
+// Edge (DocumentMessage vs ImageMessage), ya que el mime por sí solo no basta.
+enum MediaKind {
+  MEDIA_KIND_UNSPECIFIED = 0;
+  MEDIA_KIND_DOCUMENT = 1; // documento (PDF, etc.)
+  MEDIA_KIND_IMAGE = 2; // imagen
 }
 
 message RunFlowStep {
