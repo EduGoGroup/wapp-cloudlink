@@ -148,8 +148,33 @@ message Ack {
   string error = 3;
 }
 
+// Heartbeat: frame de estado/liveness edge->cloud. Ancla la sesión en el Cloud
+// (el primer Heartbeat con identidad mTLS dispara MarkOnline) y renueva el lease
+// por su lease_counter. Se emite periódicamente por cada sesión registrada.
 message Heartbeat {
   int64 lease_counter = 1;
+  // T2 (Plan 020, anti-self-loop): número propio E.164 (sin '+') del device de
+  // esta sesión. El Cloud lo usa para reconocer cuando el remitente de un
+  // entrante es un número propio del mismo tenant y así cortar el bucle. Viaja
+  // en el Heartbeat porque es el mismo frame que dispara MarkOnline. Opcional:
+  // vacío en Edges antiguos (compat).
+  string self_pn = 2;
+  // T2 (opcional, diagnóstico): JID crudo del device propio (p.ej.
+  // "12025550100:12@s.whatsapp.net"). El Cloud compara por self_pn; self_jid es
+  // solo trazabilidad. Puede ir vacío.
+  string self_jid = 3;
+  // T3 (Plan 020, estatus/zombie): estado reportado de la sesión. Por defecto
+  // SESSION_STATE_UNSPECIFIED (heartbeat normal). SESSION_STATE_LOGGED_OUT marca
+  // que WhatsApp cerró el dispositivo (LoggedOut): el Cloud debe marcar la sesión
+  // como zombie/loggedout, distinta de un offline por caída de red.
+  SessionState state = 4;
+}
+
+// Estado de sesión reportado por el Edge en el Heartbeat (Plan 020, T3). Aditivo
+// y no-breaking: valores nuevos se agregan SIEMPRE al final.
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0; // sin novedad: heartbeat de liveness normal (default/compat)
+  SESSION_STATE_LOGGED_OUT = 1; // WhatsApp cerró el device (events.LoggedOut) => zombie
 }
 
 message Pong {
