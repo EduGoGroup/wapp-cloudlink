@@ -10,7 +10,30 @@ import (
 	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
 	"github.com/EduGoGroup/wapp-cloudlink/mtls"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+	"time"
 )
+
+// keepaliveOpts refleja el keepalive de transporte de la Plataforma Cloud (Plan
+// 026 · T3): el stream Connect es bidi long-lived 24/7 tras NAT/firewalls
+// domésticos; sin keepalive un corte silencioso de NAT deja el stream
+// medio-abierto (agrava la fuga de sesiones H1). El servidor hace PING cada
+// Time=30s (Timeout=10s para declarar muerto el transporte) y la
+// EnforcementPolicy admite los PING del cliente Edge con MinTime=15s +
+// PermitWithoutStream. Parámetros IDÉNTICOS a wapp-cloud-platform para que el
+// cliente Edge no reciba GOAWAY too_many_pings de un extremo y no del otro.
+func keepaliveOpts() []grpc.ServerOption {
+	return []grpc.ServerOption{
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             15 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	}
+}
 
 // main ensambla un servidor CloudLink de demostración. Si existen los certs de
 // dev (ver scripts/gen-dev-certs.sh) arranca con mTLS; si no, arranca inseguro
@@ -22,7 +45,7 @@ func main() {
 	addr := envOr("CLOUDLINK_ADDR", ":8101")
 	certDir := envOr("CLOUDLINK_CERT_DIR", "certs")
 
-	var opts []grpc.ServerOption
+	opts := keepaliveOpts()
 	caFile := filepath.Join(certDir, "ca.crt")
 	certFile := filepath.Join(certDir, "server.crt")
 	keyFile := filepath.Join(certDir, "server.key")

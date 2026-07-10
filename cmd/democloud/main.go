@@ -32,6 +32,7 @@ import (
 	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
 	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 func main() {
@@ -40,7 +41,20 @@ func main() {
 	addr := envOr("CLOUDLINK_ADDR", ":8101")
 	srv := server.New()
 
-	gs := grpc.NewServer() // insecure: driver de demo
+	// insecure: driver de demo. Keepalive espejo de la Plataforma (Plan 026 · T3)
+	// y de cmd/cloudlink: PING cada 30s (Timeout 10s) y admite los PING del Edge
+	// con MinTime=15s + PermitWithoutStream, para que el e2e local reproduzca la
+	// detección de transporte muerto sin GOAWAY too_many_pings.
+	gs := grpc.NewServer(
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             15 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	cloudlinkv1.RegisterCloudLinkServer(gs, srv)
 	cloudlinkv1.RegisterEnrollmentServer(gs, srv)
 
