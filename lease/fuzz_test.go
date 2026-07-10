@@ -27,14 +27,14 @@ func FuzzOpen(f *testing.F) {
 		f.Fatalf("seal: %v", err)
 	}
 
-	f.Add(valid)                                              // sobre válido y firmado
-	f.Add([]byte(`{"claims":"eyJhIjoxfQ==","sig":"AAAA"}`))   // JSON válido, firma inválida
-	f.Add([]byte(`{"claims":"","sig":""}`))                   // vacíos
-	f.Add([]byte(`{}`))                                       // objeto vacío
-	f.Add([]byte(``))                                         // bytes vacíos
-	f.Add([]byte(`no soy json`))                              // no-JSON
-	f.Add([]byte(`{"claims":123,"sig":"zz"}`))                // tipos incorrectos
-	f.Add(valid[:len(valid)/2])                               // truncado
+	f.Add(valid)                                            // sobre válido y firmado
+	f.Add([]byte(`{"claims":"eyJhIjoxfQ==","sig":"AAAA"}`)) // JSON válido, firma inválida
+	f.Add([]byte(`{"claims":"","sig":""}`))                 // vacíos
+	f.Add([]byte(`{}`))                                     // objeto vacío
+	f.Add([]byte(``))                                       // bytes vacíos
+	f.Add([]byte(`no soy json`))                            // no-JSON
+	f.Add([]byte(`{"claims":123,"sig":"zz"}`))              // tipos incorrectos
+	f.Add(valid[:len(valid)/2])                             // truncado
 
 	f.Fuzz(func(t *testing.T, blob []byte) {
 		// Contrato: no panic. El resultado (claims/error) es irrelevante para el

@@ -10,6 +10,7 @@
 package enroll
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -82,4 +83,45 @@ func (s *MemoryStore) Consume(code string) (string, error) {
 	}
 	c.used = true
 	return c.tenantID, nil
+}
+
+// GC elimina del store los códigos ya EXPIRADOS (TTL vencido). Los códigos de un
+// solo uso son efímeros: sin barrido, los sembrados y caducados se acumularían en
+// memoria sin límite. Devuelve cuántos eliminó. Idempotente y seguro para
+// concurrencia. Sin regresión de seguridad: un código expirado ya fallaba con
+// ErrCodeExpired; tras el GC falla con ErrCodeNotFound (ambos => PermissionDenied
+// en el transporte) y jamás puede volver a tener éxito.
+func (s *MemoryStore) GC() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	removed := 0
+	for code, c := range s.codes {
+		if now.After(c.expiry) {
+			delete(s.codes, code)
+			removed++
+		}
+	}
+	return removed
+}
+
+// StartGC lanza un barrido periódico (GC) hasta que ctx se cancele. Conveniencia
+// para el arranque de la Plataforma; NewMemoryStore no crea goroutines por sí
+// solo, así que el GC periódico es opt-in explícito. every<=0 no arranca nada.
+func (s *MemoryStore) StartGC(ctx context.Context, every time.Duration) {
+	if every <= 0 {
+		return
+	}
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.GC()
+			}
+		}
+	}()
 }

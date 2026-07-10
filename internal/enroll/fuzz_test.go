@@ -32,12 +32,12 @@ func FuzzParseAndVerifyCSR(f *testing.F) {
 	}
 	validPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
 
-	f.Add(validPEM)                                                                   // CSR válido
-	f.Add([]byte(""))                                                                 // vacío
-	f.Add([]byte("garbage not pem"))                                                  // no-PEM
+	f.Add(validPEM)                                                                               // CSR válido
+	f.Add([]byte(""))                                                                             // vacío
+	f.Add([]byte("garbage not pem"))                                                              // no-PEM
 	f.Add([]byte("-----BEGIN CERTIFICATE REQUEST-----\nYWJj\n-----END CERTIFICATE REQUEST-----")) // PEM con DER basura
-	f.Add([]byte("-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----"))     // tipo de bloque equivocado
-	f.Add(validPEM[:len(validPEM)/2])                                                 // truncado
+	f.Add([]byte("-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----"))                 // tipo de bloque equivocado
+	f.Add(validPEM[:len(validPEM)/2])                                                             // truncado
 
 	f.Fuzz(func(t *testing.T, csrPEM []byte) {
 		// Contrato: no panic ante cualquier entrada.
