@@ -36,6 +36,10 @@ type Enrolled struct {
 	CAPool *x509.CertPool
 	// TenantID asociado al Edge enrolado.
 	TenantID string
+	// CloudEncPubkey es la pública X25519 (32B) de cifrado de la nube: el Edge la
+	// usa para sellar los campos sensibles (SealFor -> enc_payload). Puede ir
+	// vacía si el servidor no la configuró (T6/H8).
+	CloudEncPubkey []byte
 }
 
 // EnrollClient modela lo que hará el Edge en T6: genera un par ECDSA P-256 (la
@@ -77,8 +81,9 @@ func EnrollClient(ctx context.Context, cc grpc.ClientConnInterface, activationCo
 			PrivateKey:  key,
 			Leaf:        leaf,
 		},
-		CAPool:   caPool,
-		TenantID: resp.GetTenantId(),
+		CAPool:         caPool,
+		TenantID:       resp.GetTenantId(),
+		CloudEncPubkey: resp.GetCloudEncPubkey(),
 	}, nil
 }
 

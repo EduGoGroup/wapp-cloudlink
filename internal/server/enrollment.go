@@ -38,7 +38,7 @@ func (s *enrollmentService) EnrollEdge(ctx context.Context, req *cloudlinkv1.Enr
 		return nil, status.Error(codes.InvalidArgument, "csr_pem requerido")
 	}
 
-	edgeCertPEM, caChainPEM, tenantID, err := s.enroller.Enroll(ctx, req.GetActivationCode(), req.GetCsrPem())
+	edgeCertPEM, caChainPEM, tenantID, cloudEncPubkey, err := s.enroller.Enroll(ctx, req.GetActivationCode(), req.GetCsrPem())
 	if err != nil {
 		switch {
 		case errors.Is(err, enroll.ErrInvalidCSR):
@@ -52,9 +52,13 @@ func (s *enrollmentService) EnrollEdge(ctx context.Context, req *cloudlinkv1.Enr
 		}
 	}
 
+	// cloud_enc_pubkey: la X25519 pública de la nube para que el Edge selle los
+	// sensibles (T6/H8). Se propaga tal cual la entregue el enrolador (puede ir
+	// vacía si no está configurada; el contrato ya reservaba el campo).
 	return &cloudlinkv1.EnrollEdgeResponse{
-		EdgeCertPem: edgeCertPEM,
-		CaChainPem:  caChainPEM,
-		TenantId:    tenantID,
+		EdgeCertPem:    edgeCertPEM,
+		CaChainPem:     caChainPEM,
+		TenantId:       tenantID,
+		CloudEncPubkey: cloudEncPubkey,
 	}, nil
 }

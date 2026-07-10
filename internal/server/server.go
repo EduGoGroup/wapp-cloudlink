@@ -31,8 +31,12 @@ import (
 // Enroller es la dependencia de enrolamiento del servidor (implementada por
 // *enroll.Service). Se inyecta con WithEnroller; si no se inyecta, EnrollEdge
 // responde Unimplemented (modo transporte puro sin PKI).
+//
+// cloudEncPubkey es la pública X25519 de cifrado de la nube (32B) que el Edge usa
+// para sellar los campos sensibles (SealFor) hacia enc_payload (T6/H8). Puede ir
+// vacía si el enrolador no la tiene configurada (compat).
 type Enroller interface {
-	Enroll(ctx context.Context, activationCode string, csrPEM []byte) (edgeCertPEM, caChainPEM []byte, tenantID string, err error)
+	Enroll(ctx context.Context, activationCode string, csrPEM []byte) (edgeCertPEM, caChainPEM []byte, tenantID string, cloudEncPubkey []byte, err error)
 }
 
 // LeaseIssuer es la dependencia de emisión de leases (implementada por

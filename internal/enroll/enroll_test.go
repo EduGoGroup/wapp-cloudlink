@@ -1,7 +1,10 @@
 package enroll_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
 	"crypto/tls"
 	"net"
 	"testing"
@@ -122,6 +125,37 @@ func TestEnrollThenMTLS(t *testing.T) {
 		Payload:   &cloudlinkv1.EdgeToCloud_Heartbeat{Heartbeat: &cloudlinkv1.Heartbeat{}},
 	}); err != nil {
 		t.Fatalf("mTLS con cert enrolado: Send falló: %v", err)
+	}
+}
+
+// TestEnrollCloudEncPubkey cubre T6/H8: si el servicio se configura con la
+// pública X25519 de la nube, EnrollEdge la devuelve y el Edge la recibe en
+// Enrolled.CloudEncPubkey (para sellar los sensibles).
+func TestEnrollCloudEncPubkey(t *testing.T) {
+	ca, err := enroll.NewDevCA("wapp-dev-ca", time.Hour, time.Hour)
+	if err != nil {
+		t.Fatalf("NewDevCA: %v", err)
+	}
+	pub, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generar X25519: %v", err)
+	}
+	wantPub := pub.PublicKey().Bytes()
+
+	store := enroll.NewMemoryStore()
+	store.Add("CODE-ENC", "tenant-9", time.Now().Add(time.Hour))
+	svc := enroll.NewService(store, ca, enroll.WithCloudEncPubkey(wantPub))
+	cc := startEnrollServer(t, svc)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	enrolled, err := enroll.EnrollClient(ctx, cc, "CODE-ENC", enroll.EdgeIdentity{CommonName: "edge-enc"})
+	if err != nil {
+		t.Fatalf("EnrollClient: %v", err)
+	}
+	if !bytes.Equal(enrolled.CloudEncPubkey, wantPub) {
+		t.Fatalf("cloud_enc_pubkey: got %x, want %x", enrolled.CloudEncPubkey, wantPub)
 	}
 }
 
