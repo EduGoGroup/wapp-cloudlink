@@ -1,7 +1,11 @@
 // Package client implementa el lado edge del contrato CloudLink: abre el stream
 // Connect, envía eventos edge->cloud y recibe comandos cloud->edge. La
 // correlación comando<->ack se hace por command_id en capas superiores; aquí se
-// expone el canal de recepción crudo. T2 es transporte vivo sin TLS.
+// expone el canal de recepción crudo.
+//
+// El Edge debe construir el grpc.ClientConn con transport.DialOptions() para
+// imponer los mismos límites de tamaño de mensaje que el servidor (T7/H4); New no
+// dialga, recibe una conexión ya establecida.
 package client
 
 import (

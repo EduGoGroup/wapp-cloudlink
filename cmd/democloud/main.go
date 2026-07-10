@@ -31,6 +31,7 @@ import (
 
 	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
 	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
+	"github.com/EduGoGroup/wapp-cloudlink/transport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
@@ -47,7 +48,7 @@ func main() {
 	// y de cmd/cloudlink: PING cada 30s (Timeout 10s) y admite los PING del Edge
 	// con MinTime=15s + PermitWithoutStream, para que el e2e local reproduzca la
 	// detección de transporte muerto sin GOAWAY too_many_pings.
-	gs := grpc.NewServer(
+	gsOpts := []grpc.ServerOption{
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    30 * time.Second,
 			Timeout: 10 * time.Second,
@@ -56,7 +57,9 @@ func main() {
 			MinTime:             15 * time.Second,
 			PermitWithoutStream: true,
 		}),
-	)
+	}
+	gsOpts = append(gsOpts, transport.ServerOptions()...)
+	gs := grpc.NewServer(gsOpts...)
 	cloudlinkv1.RegisterCloudLinkServer(gs, srv)
 	cloudlinkv1.RegisterEnrollmentServer(gs, srv)
 

@@ -9,6 +9,7 @@ import (
 	cloudlinkv1 "github.com/EduGoGroup/wapp-cloudlink/gen/wapp/cloudlink/v1"
 	"github.com/EduGoGroup/wapp-cloudlink/internal/server"
 	"github.com/EduGoGroup/wapp-cloudlink/mtls"
+	"github.com/EduGoGroup/wapp-cloudlink/transport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"time"
@@ -45,7 +46,7 @@ func main() {
 	addr := envOr("CLOUDLINK_ADDR", ":8101")
 	certDir := envOr("CLOUDLINK_CERT_DIR", "certs")
 
-	opts := keepaliveOpts()
+	opts := append(keepaliveOpts(), transport.ServerOptions()...)
 	caFile := filepath.Join(certDir, "ca.crt")
 	certFile := filepath.Join(certDir, "server.crt")
 	keyFile := filepath.Join(certDir, "server.key")

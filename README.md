@@ -40,6 +40,17 @@ sobre gRPC bidi-stream con mTLS. Por aquí viajan órdenes de despacho
 | Multiplexado | Por `session_id` (un Edge gestiona N teléfonos) |
 | Resiliencia | Backoff exponencial en el Edge + `outbox` SQLite |
 
+## Límites de transporte e inline→presigned (Plan 027 · Ola 1 · T7)
+
+Los límites de tamaño de mensaje son una **fuente de verdad única** en el paquete
+`transport` (`MaxMessageBytes`, 4 MiB), aplicados de forma **coherente en ambos
+extremos**: el servidor con `transport.ServerOptions()` (`grpc.NewServer`) y el
+Edge con `transport.DialOptions()` (`grpc.NewClient`). La media (`SendMedia`) que
+supere ese límite **debe** viajar como `presigned_url` (patrón R2 del Plan 017),
+no `inline`: además de exceder el límite, un `inline` grande bloquearía bajo el
+`sendMu` de la sesión a los `Ping` y al `LeaseUpdate` (kill-switch). El presigned
+ya existe en el contrato y en la Plataforma; el límite solo lo hace exigible.
+
 ## Código generado
 
 El código protobuf/gRPC generado **se commitea** y vive en
