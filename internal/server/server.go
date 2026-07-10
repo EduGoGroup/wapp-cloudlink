@@ -1,7 +1,16 @@
 // Package server implementa el lado cloud del contrato CloudLink: registra los
 // servicios Enrollment y CloudLink y mantiene, por sesión (session_id), el
-// stream activo para poder empujar comandos cloud->edge. T2 es transporte vivo
-// sin TLS; el mTLS/enrolamiento real llega en T3/T4.
+// stream activo para poder empujar comandos cloud->edge.
+//
+// IMPLEMENTACIÓN DE REFERENCIA / DEMO — no es el servidor de producción.
+// El servidor CloudLink real que terminan los Edges vive en la Plataforma Cloud
+// (repo wapp-cloud-platform, paquete internal/gateway/grpc): ahí están el mTLS
+// estricto, el fleet, la persistencia de leases y los dos listeners. Este
+// paquete existe para (a) validar el contrato proto extremo a extremo, (b) los
+// arneses e2e de esta pieza (cmd/cloudlink, cmd/democloud) y (c) servir de
+// referencia legible del ciclo de vida del stream. Vive bajo internal/ a
+// propósito: NO debe importarse desde otros repos; la Plataforma tiene su propia
+// implementación y no depende de este paquete (decisión Plan 027 · Ola 0 · T4).
 package server
 
 import (
@@ -104,10 +113,16 @@ func (s *Server) Received() <-chan *cloudlinkv1.EdgeToCloud {
 }
 
 // Connect es el handler bidi: drena EdgeToCloud y registra cada session_id
-// observado para poder enrutar comandos cloud->edge vía Push.
+// observado para poder enrutar comandos cloud->edge vía Push. Al salir el stream
+// (EOF, error o corte de contexto) da de baja todas las sesiones que registró
+// este conn, evitando enrutar Push/PushLease (incl. el kill-switch anti-clon) a
+// un stream zombi (H1). Un Edge multiplexa N sesiones sobre un stream (ADR-0008),
+// de ahí que se rastree el conjunto de session_id vistos en este stream.
 func (s *Server) Connect(stream cloudlinkv1.CloudLink_ConnectServer) error {
 	c := &conn{stream: stream}
 	ctx := stream.Context()
+	mine := make(map[string]struct{})
+	defer s.deregister(c, mine)
 	for {
 		msg, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -118,6 +133,7 @@ func (s *Server) Connect(stream cloudlinkv1.CloudLink_ConnectServer) error {
 		}
 		if sid := msg.GetSessionId(); sid != "" {
 			s.register(sid, c)
+			mine[sid] = struct{}{}
 			s.maybeRenewLease(sid, msg, c)
 		}
 		select {
@@ -166,6 +182,20 @@ func (s *Server) register(sessionID string, c *conn) {
 	s.mu.Lock()
 	s.sessions[sessionID] = c
 	s.mu.Unlock()
+}
+
+// deregister da de baja las sesiones que registró un conn al terminar su stream.
+// Solo borra la entrada si sigue apuntando a ESTE conn: una reconexión más nueva
+// pudo haber reemplazado el mapeo (mismo session_id, stream distinto), y en ese
+// caso no debe tocarse para no dejar la sesión viva sin ruta (H1).
+func (s *Server) deregister(c *conn, sessionIDs map[string]struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for sid := range sessionIDs {
+		if s.sessions[sid] == c {
+			delete(s.sessions, sid)
+		}
+	}
 }
 
 // Push enruta un comando cloud->edge a la sesión indicada. Falla si la sesión

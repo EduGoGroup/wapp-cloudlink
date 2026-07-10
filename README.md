@@ -1,8 +1,23 @@
 # wapp-cloudlink (Pieza 02)
 
 Contrato y conducto entre el Edge Agent y la Plataforma Cloud. Define el
-esquema protobuf y contiene el servidor gRPC del lado cloud (puede vivir como
-módulo dentro de `wapp-cloud-platform` o extraerse a servicio propio).
+esquema protobuf (fuente de verdad del contrato) y el cliente Go del lado Edge,
+más una **implementación de referencia** del servidor gRPC del lado cloud.
+
+## Frontera servidor: referencia vs. producción (Plan 027 · Ola 0 · T4)
+
+`internal/server` es una **implementación de referencia / demo**, no el servidor
+de producción. El servidor CloudLink real que terminan los Edges vive en la
+**Plataforma Cloud** (`wapp-cloud-platform`, paquete `internal/gateway/grpc`):
+ahí están el mTLS estricto, el fleet, la persistencia de leases y los dos
+listeners. La Plataforma **no importa** este paquete —tiene su propia
+implementación— y por eso `internal/server` vive bajo `internal/` a propósito:
+es inimportable cross-repo. Su razón de ser es (a) validar el contrato proto
+extremo a extremo, (b) alimentar los arneses e2e de esta pieza
+(`cmd/cloudlink`, `cmd/democloud`) y (c) servir de referencia legible del ciclo
+de vida del stream. Lo que este repo **exporta** para consumo externo es el
+contrato (`gen/`), el cliente (`client/`) y el lease (`internal/lease` modela
+ambos lados). Decisión: **no** se extrae el servidor a un paquete compartido.
 
 ## Rol en wApp
 
