@@ -18,6 +18,9 @@ type Client struct {
 
 	sendMu   sync.Mutex
 	received chan *cloudlinkv1.CloudToEdge
+
+	errMu   sync.Mutex
+	lastErr error
 }
 
 // New abre el stream Connect sobre una conexión gRPC ya establecida y arranca el
@@ -40,10 +43,24 @@ func (c *Client) recvLoop() {
 	for {
 		msg, err := c.stream.Recv()
 		if err != nil {
+			c.errMu.Lock()
+			c.lastErr = err
+			c.errMu.Unlock()
 			return
 		}
 		c.received <- msg
 	}
+}
+
+// Err devuelve la causa por la que terminó el stream, disponible una vez que el
+// canal Received se ha cerrado. io.EOF indica cierre ordenado del servidor;
+// cualquier otro error (context.Canceled, status codes.Unavailable, etc.) es un
+// fallo de transporte con el que el Edge decide su backoff. Devuelve nil mientras
+// el stream sigue vivo, así que consúmelo tras observar el cierre de Received.
+func (c *Client) Err() error {
+	c.errMu.Lock()
+	defer c.errMu.Unlock()
+	return c.lastErr
 }
 
 // Send emite un evento/estado edge->cloud. Serializa los envíos: stream.Send no
