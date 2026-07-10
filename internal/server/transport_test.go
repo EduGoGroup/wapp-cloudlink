@@ -319,3 +319,44 @@ func TestClientErrPropagation(t *testing.T) {
 		t.Fatal("H5: tras el corte, Err() devolvió nil; el Edge no puede distinguir la causa")
 	}
 }
+
+// TestClientSendAfterClose cubre el camino de error del emisor (T8/H10): una vez
+// muerto el stream, Send devuelve error en vez de fingir éxito; así el Edge sabe
+// que debe encolar en el outbox (ADR-0003) y reconectar, en lugar de perder el
+// evento en silencio.
+func TestClientSendAfterClose(t *testing.T) {
+	srv, dial := newServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cli := registerSession(t, srv, dial(ctx), ctx, "sess-send")
+
+	cancel() // mata el stream
+
+	// Espera al cierre real del canal de recepción (el recvLoop vio el error).
+	select {
+	case _, ok := <-cli.Received():
+		if ok {
+			<-cli.Received()
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout esperando el cierre del canal Received")
+	}
+
+	// Con el stream ya muerto, Send debe fallar (reintenta brevemente por si el
+	// transporte tarda un instante en propagar el corte).
+	deadline := time.After(3 * time.Second)
+	for {
+		err := cli.Send(&cloudlinkv1.EdgeToCloud{
+			SessionId: "sess-send",
+			Payload:   &cloudlinkv1.EdgeToCloud_Heartbeat{Heartbeat: &cloudlinkv1.Heartbeat{}},
+		})
+		if err != nil {
+			return // comportamiento esperado
+		}
+		select {
+		case <-deadline:
+			t.Fatal("Send tras cierre del stream: se esperaba error, siguió devolviendo nil")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
