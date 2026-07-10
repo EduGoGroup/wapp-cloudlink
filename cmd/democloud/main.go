@@ -39,7 +39,9 @@ func main() {
 	log.SetFlags(log.LstdFlags)
 
 	addr := envOr("CLOUDLINK_ADDR", ":8101")
-	srv := server.New()
+	srv := server.New(server.WithSaturationHook(func(sessionID string, dropped uint64) {
+		log.Printf("⚠️  SATURACIÓN sesión=%q descartados=%d (consumidor lento)", sessionID, dropped)
+	}))
 
 	// insecure: driver de demo. Keepalive espejo de la Plataforma (Plan 026 · T3)
 	// y de cmd/cloudlink: PING cada 30s (Timeout 10s) y admite los PING del Edge

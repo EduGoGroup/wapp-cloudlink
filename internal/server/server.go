@@ -52,6 +52,25 @@ func WithEnroller(e Enroller) Option {
 	return func(s *Server) { s.enrollmentService.enroller = e }
 }
 
+// WithInboxCapacity fija el tamaño del buffer acotado de recepción por sesión
+// (T5/H2). Al llenarse, deliver descarta el entrante e incrementa el contador de
+// saturación de esa sesión sin bloquear la recepción. Valor <=0 usa el default.
+func WithInboxCapacity(n int) Option {
+	return func(s *Server) {
+		if n > 0 {
+			s.cloudlinkService.inboxCap = n
+		}
+	}
+}
+
+// WithSaturationHook registra un callback que se invoca en cada descarte por
+// saturación (T5/H2), con el session_id y el total descartado de esa sesión. Útil
+// para loguear/exportar métrica. Debe ser rápido y no bloquear (corre en el path
+// de recepción).
+func WithSaturationHook(fn func(sessionID string, dropped uint64)) Option {
+	return func(s *Server) { s.cloudlinkService.onSaturation = fn }
+}
+
 // WithLeaseRenewal habilita la renovación del lease anclada al Heartbeat: cuando
 // llega un Heartbeat con lease_counter=N, el servidor emite un lease renovado con
 // counter=N+1 válido por ttl y lo empuja por el mismo stream. Sin esta opción el

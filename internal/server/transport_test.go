@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -231,6 +232,61 @@ func TestDeregisterOnDisconnectAndReconnect(t *testing.T) {
 		}
 	case <-ctxB.Done():
 		t.Fatalf("reconexión: timeout esperando el push en B: %v", ctxB.Err())
+	}
+}
+
+// TestConcurrentSessionsReception cubre T5/H2 end-to-end con -race: 3 sesiones
+// envían concurrentemente por streams distintos y el consumidor común recibe
+// TODOS los mensajes de TODAS las sesiones (inbox por sesión + fan-in correcto
+// bajo concurrencia).
+func TestConcurrentSessionsReception(t *testing.T) {
+	srv, dial := newServer(t)
+	out := srv.Received() // arranca el fan-in antes de conectar sesiones
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	const perSession = 20
+	sessions := []string{"s-a", "s-b", "s-c"}
+
+	var wg sync.WaitGroup
+	for _, sid := range sessions {
+		cli, err := client.New(ctx, dial(ctx))
+		if err != nil {
+			t.Fatalf("client.New(%s): %v", sid, err)
+		}
+		wg.Add(1)
+		go func(sid string) {
+			defer wg.Done()
+			for i := 0; i < perSession; i++ {
+				if err := cli.Send(&cloudlinkv1.EdgeToCloud{
+					SessionId: sid,
+					Payload: &cloudlinkv1.EdgeToCloud_Incoming{
+						Incoming: &cloudlinkv1.IncomingMessage{Text: "x"},
+					},
+				}); err != nil {
+					return
+				}
+			}
+		}(sid)
+	}
+
+	got := map[string]int{}
+	want := perSession * len(sessions)
+	for total := 0; total < want; total++ {
+		select {
+		case m := <-out:
+			got[m.GetSessionId()]++
+		case <-ctx.Done():
+			t.Fatalf("timeout: recibidos %d/%d %v", total, want, got)
+		}
+	}
+	wg.Wait()
+
+	for _, sid := range sessions {
+		if got[sid] != perSession {
+			t.Errorf("sesión %s: recibidos %d, want %d", sid, got[sid], perSession)
+		}
 	}
 }
 

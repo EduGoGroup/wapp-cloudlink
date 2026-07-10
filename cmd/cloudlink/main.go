@@ -61,7 +61,9 @@ func main() {
 	}
 
 	gs := grpc.NewServer(opts...)
-	srv := server.New()
+	srv := server.New(server.WithSaturationHook(func(sessionID string, dropped uint64) {
+		log.Printf("cloudlink: SATURACIÓN sesión=%q descartados=%d (consumidor lento)", sessionID, dropped)
+	}))
 	cloudlinkv1.RegisterCloudLinkServer(gs, srv)
 	cloudlinkv1.RegisterEnrollmentServer(gs, srv)
 
