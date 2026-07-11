@@ -258,6 +258,93 @@ func TestHeartbeat_OldSenderDecodesInNewShape(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsRequest_Roundtrip(t *testing.T) {
+	in := &CloudToEdge{
+		CommandId: "diag-1",
+		SessionId: "sess-1",
+		Payload: &CloudToEdge_DiagnosticsRequest{
+			DiagnosticsRequest: &DiagnosticsRequest{
+				CommandId: "diag-1",
+				SessionId: "sess-1",
+				Scope:     "full",
+			},
+		},
+	}
+	b, err := proto.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal CloudToEdge: %v", err)
+	}
+	var out CloudToEdge
+	if err := proto.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal CloudToEdge: %v", err)
+	}
+	dr := out.GetDiagnosticsRequest()
+	if dr == nil {
+		t.Fatalf("diagnostics_request nil tras el roundtrip")
+	}
+	if dr.GetCommandId() != "diag-1" || dr.GetScope() != "full" {
+		t.Errorf("command_id/scope = %q/%q, want diag-1/full", dr.GetCommandId(), dr.GetScope())
+	}
+}
+
+func TestDiagnosticsBundle_Roundtrip(t *testing.T) {
+	in := &EdgeToCloud{
+		CommandId: "diag-1",
+		SessionId: "sess-1",
+		Payload: &EdgeToCloud_DiagnosticsBundle{
+			DiagnosticsBundle: &DiagnosticsBundle{
+				CommandId:      "diag-1",
+				LogTail:        "linea1\nlinea2",
+				GoroutineDump:  "goroutine 1 [running]:",
+				SubsystemsJson: `{"intent":{"circuit":"closed"}}`,
+			},
+		},
+	}
+	b, err := proto.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal EdgeToCloud: %v", err)
+	}
+	var out EdgeToCloud
+	if err := proto.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal EdgeToCloud: %v", err)
+	}
+	db := out.GetDiagnosticsBundle()
+	if db == nil {
+		t.Fatalf("diagnostics_bundle nil tras el roundtrip")
+	}
+	if db.GetCommandId() != "diag-1" || db.GetLogTail() != "linea1\nlinea2" {
+		t.Errorf("command_id/log_tail = %q/%q", db.GetCommandId(), db.GetLogTail())
+	}
+	if db.GetSubsystemsJson() != `{"intent":{"circuit":"closed"}}` {
+		t.Errorf("subsystems_json = %q", db.GetSubsystemsJson())
+	}
+}
+
+// Compat: un receptor viejo de CloudToEdge (solo command_id/session_id) parsea un
+// DiagnosticsRequest (campo 16) sin error, reteniéndolo como unknown field.
+func TestCloudToEdge_DiagnosticsRequest_ForwardCompatOldReceiver(t *testing.T) {
+	newMsg := &CloudToEdge{
+		CommandId: "diag-9",
+		SessionId: "sess-9",
+		Payload:   &CloudToEdge_DiagnosticsRequest{DiagnosticsRequest: &DiagnosticsRequest{Scope: "logs"}},
+	}
+	wire, err := proto.Marshal(newMsg)
+	if err != nil {
+		t.Fatalf("marshal newMsg: %v", err)
+	}
+	legacyMD := legacyCloudToEdgeDescriptor(t)
+	legacy := dynamicpb.NewMessage(legacyMD)
+	if err := proto.Unmarshal(wire, legacy); err != nil {
+		t.Fatalf("un receptor viejo no debe fallar al parsear diagnostics_request: %v", err)
+	}
+	if legacy.Get(legacyMD.Fields().ByName("command_id")).String() != "diag-9" {
+		t.Errorf("command_id base perdido")
+	}
+	if len(legacy.GetUnknown()) == 0 {
+		t.Errorf("diagnostics_request debía retenerse como unknown field, no vacío")
+	}
+}
+
 // legacyHeartbeatDescriptor construye un Heartbeat previo al Plan 031: los campos
 // base 1-4 (lease_counter/self_pn/self_jid/state) sin el campo 5 (session_health).
 // Sirve para simular un receptor/emisor que no conoce la telemetría de salud.

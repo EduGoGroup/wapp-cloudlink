@@ -23,14 +23,23 @@ todavía.
   - `Heartbeat.session_health = 5`: opcional; ausencia = "sin datos de salud"
     (Edge antiguo), no salud mala. Separa `link_state` (registro CloudLink) de la
     salud real del socket.
+- Diagnóstico remoto bajo demanda (Plan 031 / ADR-0023):
+  - Nuevo mensaje `DiagnosticsRequest { string command_id = 1; string session_id
+    = 2; string scope = 3; }`.
+  - Nuevo mensaje `DiagnosticsBundle { string command_id = 1; string log_tail = 2;
+    string goroutine_dump = 3; string subsystems_json = 4; }` — el Edge sanea y
+    trunca en origen; debe caber en el límite de 4 MiB del transporte.
+  - `CloudToEdge.diagnostics_request = 16` y `EdgeToCloud.diagnostics_bundle = 16`
+    (nuevas ramas de los oneof `payload`).
 
 ### Compatibilidad
 
 - Todos los cambios son aditivos: campos/frames nuevos al final, sin renumerar.
   `buf breaking` (regla FILE) contra `main` pasa sin hallazgos. Tests de contrato
   bidireccionales verdes: un receptor de `v0.8.0` parsea `Heartbeat{SessionHealth}`
-  sin error (campo nuevo retenido como unknown field); un emisor viejo decodifica
-  en el shape nuevo con `session_health` nil.
+  y `CloudToEdge{DiagnosticsRequest}` sin error (campos nuevos retenidos como
+  unknown fields); un emisor viejo decodifica en el shape nuevo con
+  `session_health` nil.
 
 ## [0.8.0] - 2026-07-11
 

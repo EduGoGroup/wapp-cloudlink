@@ -41,6 +41,7 @@ message CloudToEdge {
     LeaseUpdate lease_update = 13;
     Ping ping = 14;
     ConfigUpdate config_update = 15;
+    DiagnosticsRequest diagnostics_request = 16;
   }
 }
 
@@ -55,6 +56,7 @@ message EdgeToCloud {
     Heartbeat heartbeat = 13;
     Pong pong = 14;
     MessageReceipt receipt = 15;
+    DiagnosticsBundle diagnostics_bundle = 16;
   }
 }
 
@@ -265,4 +267,34 @@ message ConfigUpdate {
   string kind = 3; // tipo de configuración (p.ej. "intents")
   string version = 4; // versión del contenido, para idempotencia/trazabilidad
   bytes payload = 5; // contenido serializado propio del kind
+}
+
+// DiagnosticsRequest: la nube pide bajo demanda un paquete de diagnóstico a un
+// Edge (Plan 031, ADR-0023). Diagnóstico remoto de una flota sin SSH. El Edge
+// responde con un DiagnosticsBundle correlacionado por command_id (patrón
+// ConfigUpdate: Ack + idempotencia por command_id). Solo metadatos operativos.
+message DiagnosticsRequest {
+  string command_id = 1; // correlación con el Ack y con el DiagnosticsBundle de respuesta
+  string session_id = 2;  // sesión objetivo (multiplexado); vacío = alcance del Edge completo
+  // Alcance del diagnóstico pedido (p. ej. "full", "logs", "goroutines",
+  // "subsystems"). String por extensibilidad; el Edge ignora un scope que no
+  // reconozca y devuelve lo que sepa (compat aditiva).
+  string scope = 3;
+}
+
+// DiagnosticsBundle: respuesta del Edge a un DiagnosticsRequest (Plan 031). Sube
+// por EdgeToCloud correlacionado por command_id. Frontera zero-knowledge dura
+// (ADR-0007): SOLO material operativo de diagnóstico; el Edge DEBE sanear antes
+// de enviar — JAMÁS llaves, DEK, credenciales, tokens ni contenido de mensajes,
+// ni en logs ni en dumps (el Plan 031 T8 añade un gate que escanea el bundle).
+//
+// Tope de tamaño: el transporte ya impone un máximo de 4 MiB por frame gRPC. El
+// bundle DEBE caber en ese límite; el Edge trunca en origen (ring buffer de N
+// líneas de log, dump acotado) antes de enviar. Si un futuro diagnóstico no
+// cupiera, se trocearía por command_id — hoy no hace falta.
+message DiagnosticsBundle {
+  string command_id = 1;     // correlación con el DiagnosticsRequest que lo originó
+  string log_tail = 2;       // últimas N líneas del ring buffer de logs (ya saneadas, truncadas en origen)
+  string goroutine_dump = 3; // volcado de goroutines (runtime.Stack(all=true)), truncado en origen
+  string subsystems_json = 4; // snapshot JSON de subsistemas (intent/status y pares); metadatos operativos, no PII
 }
