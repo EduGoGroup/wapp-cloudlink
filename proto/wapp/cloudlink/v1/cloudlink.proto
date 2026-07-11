@@ -40,6 +40,7 @@ message CloudToEdge {
     RunFlowStep run_flow_step = 12;
     LeaseUpdate lease_update = 13;
     Ping ping = 14;
+    ConfigUpdate config_update = 15;
   }
 }
 
@@ -107,6 +108,11 @@ message IncomingMessage {
   string from_lid = 8; // LID si se conoce
   string addressing_mode = 9; // "pn" | "lid" (diagnóstico)
   bytes enc_payload = 10; // sellado X25519 (SealFor) de un SensitivePayload marshalado, cuando está presente; si va, los planos sensibles (text/push_name/from_pn/from_lid) viajan vacíos
+  // Espejo EN CLARO de la clasificación de intención del Edge (Plan 029/ADR-0020).
+  // SOLO para despliegues SIN sealed transit: cuando enc_payload va presente, la
+  // intención viaja sellada dentro de SensitivePayload.intent y este campo va
+  // vacío. Mismo criterio que text/push_name hoy (plano solo si no hay sobre).
+  ClassifiedIntent intent = 11;
 }
 
 // Sub-payload de los campos sensibles de IncomingMessage. El Edge lo marshala y
@@ -116,6 +122,22 @@ message SensitivePayload {
   string push_name = 2;
   string from_pn = 3;
   string from_lid = 4;
+  // Clasificación local del Edge (Plan 029/ADR-0020) por el camino normal
+  // (sellado): sus params contienen texto literal del cliente, por eso viaja
+  // aquí dentro del sobre X25519 y no en claro. La nube decide la precedencia.
+  ClassifiedIntent intent = 5;
+}
+
+// Clasificación local de intención hecha por el Edge (Plan 029/ADR-0020). El
+// Cloud decide la precedencia (no confía ciegamente en el Edge). params contiene
+// texto literal del cliente ⇒ este mensaje viaja PREFERENTEMENTE sellado (dentro
+// de SensitivePayload); el espejo en claro de IncomingMessage.intent solo se usa
+// en despliegues sin sealed transit.
+message ClassifiedIntent {
+  string intent = 1; // etiqueta de intención resuelta (p.ej. "pedido", "saludo")
+  map<string, string> params = 2; // parámetros extraídos (pueden contener texto literal del cliente)
+  float confidence = 3; // confianza [0,1] reportada por el clasificador local
+  string config_version = 4; // versión del catálogo de intenciones usado (trazabilidad)
 }
 
 message DeliveryStatus {
@@ -179,4 +201,17 @@ enum SessionState {
 
 message Pong {
   int64 nonce = 1;
+}
+
+// Push genérico de configuración Cloud->Edge (ADR-0021). Frame extensible: kind
+// discrimina el tipo de configuración empujada y payload lleva el contenido
+// serializado propio de ese kind (versionado por version). Primer kind:
+// "intents" (catálogo de intenciones del clasificador local del Plan 029). El
+// Edge que no reconozca un kind debe ignorarlo sin error (compat aditiva).
+message ConfigUpdate {
+  string command_id = 1; // correlación con el Ack del Edge
+  string session_id = 2; // sesión destino (multiplexado); vacío = a todas las del Edge
+  string kind = 3; // tipo de configuración (p.ej. "intents")
+  string version = 4; // versión del contenido, para idempotencia/trazabilidad
+  bytes payload = 5; // contenido serializado propio del kind
 }
