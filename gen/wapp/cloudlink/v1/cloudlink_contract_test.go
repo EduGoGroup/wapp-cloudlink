@@ -163,14 +163,14 @@ func legacyCloudToEdgeDescriptor(t *testing.T) protoreflect.MessageDescriptor {
 	str := descriptorpb.FieldDescriptorProto_TYPE_STRING
 	lbl := descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL
 	fdp := &descriptorpb.FileDescriptorProto{
-		Name:    proto.String("legacy_cloudtoedge.proto"),
-		Syntax:  proto.String("proto3"),
-		Package: proto.String("wapp.cloudlink.legacy"),
+		Name:    new("legacy_cloudtoedge.proto"),
+		Syntax:  new("proto3"),
+		Package: new("wapp.cloudlink.legacy"),
 		MessageType: []*descriptorpb.DescriptorProto{{
-			Name: proto.String("CloudToEdge"),
+			Name: new("CloudToEdge"),
 			Field: []*descriptorpb.FieldDescriptorProto{
-				{Name: proto.String("command_id"), Number: proto.Int32(1), Type: &str, Label: &lbl, JsonName: proto.String("commandId")},
-				{Name: proto.String("session_id"), Number: proto.Int32(2), Type: &str, Label: &lbl, JsonName: proto.String("sessionId")},
+				{Name: new("command_id"), Number: new(int32(1)), Type: &str, Label: &lbl, JsonName: new("commandId")},
+				{Name: new("session_id"), Number: new(int32(2)), Type: &str, Label: &lbl, JsonName: new("sessionId")},
 			},
 		}},
 	}
