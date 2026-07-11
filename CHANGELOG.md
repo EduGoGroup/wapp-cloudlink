@@ -6,6 +6,32 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+Cambios aditivos y compatibles hacia atrás con `v0.8.0` (Plan 031, Ola 0 —
+telemetría de salud de flota + diagnóstico remoto, ADR-0023). Sin release cortada
+todavía.
+
+### Added
+
+- Telemetría de salud de sesión adjunta al heartbeat (Plan 031 / ADR-0023):
+  - Nuevo mensaje `SessionHealth { WhatsappSocketState whatsapp_socket_state = 1;
+    string degraded_reason = 2; int64 last_inbound_event_age_s = 3; int64
+    dek_load_duration_ms = 4; string intent_circuit = 5; int64 outbox_depth = 6;
+    string binary_version = 7; int64 daemon_uptime_s = 8; }` — solo metadatos
+    operativos; frontera zero-knowledge (ADR-0007): jamás llaves/DEK/credenciales.
+  - Nuevo enum `WhatsappSocketState` (UNSPECIFIED/CONNECTED/CONNECTING/DEGRADED/
+    DEAD): estado real del socket de WhatsApp con prueba de vida.
+  - `Heartbeat.session_health = 5`: opcional; ausencia = "sin datos de salud"
+    (Edge antiguo), no salud mala. Separa `link_state` (registro CloudLink) de la
+    salud real del socket.
+
+### Compatibilidad
+
+- Todos los cambios son aditivos: campos/frames nuevos al final, sin renumerar.
+  `buf breaking` (regla FILE) contra `main` pasa sin hallazgos. Tests de contrato
+  bidireccionales verdes: un receptor de `v0.8.0` parsea `Heartbeat{SessionHealth}`
+  sin error (campo nuevo retenido como unknown field); un emisor viejo decodifica
+  en el shape nuevo con `session_health` nil.
+
 ## [0.8.0] - 2026-07-11
 
 Cambios aditivos y compatibles hacia atrás con `v0.7.0` (Plan 029, Ola 0).

@@ -122,6 +122,64 @@ func (ReceiptStatus) EnumDescriptor() ([]byte, []int) {
 	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{1}
 }
 
+// WhatsappSocketState: estado del socket de WhatsApp reportado por el Edge con
+// prueba de vida (Plan 031). Aditivo/no-breaking: valores nuevos SIEMPRE al
+// final. UNSPECIFIED = el Edge no reporta salud del socket (compat).
+type WhatsappSocketState int32
+
+const (
+	WhatsappSocketState_WHATSAPP_SOCKET_STATE_UNSPECIFIED WhatsappSocketState = 0 // sin dato de salud (Edge antiguo / no medido)
+	WhatsappSocketState_WHATSAPP_SOCKET_STATE_CONNECTED   WhatsappSocketState = 1 // socket vivo y conectado (IsConnected + prueba de vida)
+	WhatsappSocketState_WHATSAPP_SOCKET_STATE_CONNECTING  WhatsappSocketState = 2 // conectando/reconectando (backoff en curso)
+	WhatsappSocketState_WHATSAPP_SOCKET_STATE_DEGRADED    WhatsappSocketState = 3 // vivo pero degradado (ver degraded_reason)
+	WhatsappSocketState_WHATSAPP_SOCKET_STATE_DEAD        WhatsappSocketState = 4 // socket caído/inoperante
+)
+
+// Enum value maps for WhatsappSocketState.
+var (
+	WhatsappSocketState_name = map[int32]string{
+		0: "WHATSAPP_SOCKET_STATE_UNSPECIFIED",
+		1: "WHATSAPP_SOCKET_STATE_CONNECTED",
+		2: "WHATSAPP_SOCKET_STATE_CONNECTING",
+		3: "WHATSAPP_SOCKET_STATE_DEGRADED",
+		4: "WHATSAPP_SOCKET_STATE_DEAD",
+	}
+	WhatsappSocketState_value = map[string]int32{
+		"WHATSAPP_SOCKET_STATE_UNSPECIFIED": 0,
+		"WHATSAPP_SOCKET_STATE_CONNECTED":   1,
+		"WHATSAPP_SOCKET_STATE_CONNECTING":  2,
+		"WHATSAPP_SOCKET_STATE_DEGRADED":    3,
+		"WHATSAPP_SOCKET_STATE_DEAD":        4,
+	}
+)
+
+func (x WhatsappSocketState) Enum() *WhatsappSocketState {
+	p := new(WhatsappSocketState)
+	*p = x
+	return p
+}
+
+func (x WhatsappSocketState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (WhatsappSocketState) Descriptor() protoreflect.EnumDescriptor {
+	return file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[2].Descriptor()
+}
+
+func (WhatsappSocketState) Type() protoreflect.EnumType {
+	return &file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[2]
+}
+
+func (x WhatsappSocketState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use WhatsappSocketState.Descriptor instead.
+func (WhatsappSocketState) EnumDescriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{2}
+}
+
 // Estado de sesión reportado por el Edge en el Heartbeat (Plan 020, T3). Aditivo
 // y no-breaking: valores nuevos se agregan SIEMPRE al final.
 type SessionState int32
@@ -154,11 +212,11 @@ func (x SessionState) String() string {
 }
 
 func (SessionState) Descriptor() protoreflect.EnumDescriptor {
-	return file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[2].Descriptor()
+	return file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[3].Descriptor()
 }
 
 func (SessionState) Type() protoreflect.EnumType {
-	return &file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[2]
+	return &file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[3]
 }
 
 func (x SessionState) Number() protoreflect.EnumNumber {
@@ -167,7 +225,7 @@ func (x SessionState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SessionState.Descriptor instead.
 func (SessionState) EnumDescriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{2}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{3}
 }
 
 type EnrollEdgeRequest struct {
@@ -1432,7 +1490,14 @@ type Heartbeat struct {
 	// SESSION_STATE_UNSPECIFIED (heartbeat normal). SESSION_STATE_LOGGED_OUT marca
 	// que WhatsApp cerró el dispositivo (LoggedOut): el Cloud debe marcar la sesión
 	// como zombie/loggedout, distinta de un offline por caída de red.
-	State         SessionState `protobuf:"varint,4,opt,name=state,proto3,enum=wapp.cloudlink.v1.SessionState" json:"state,omitempty"`
+	State SessionState `protobuf:"varint,4,opt,name=state,proto3,enum=wapp.cloudlink.v1.SessionState" json:"state,omitempty"`
+	// T1 (Plan 031, telemetría de salud): snapshot operativo de la sesión adjunto
+	// al mismo frame que dispara MarkOnline. OPCIONAL: los Edges antiguos no lo
+	// envían y el Cloud debe tratar su ausencia como "sin datos de salud" (no como
+	// salud mala). Separa el registro CloudLink (link_state) de la salud real del
+	// socket de WhatsApp. Frontera zero-knowledge (ADR-0007): SOLO metadatos
+	// operativos; JAMÁS llaves, DEK, credenciales ni contenido de mensajes.
+	SessionHealth *SessionHealth `protobuf:"bytes,5,opt,name=session_health,json=sessionHealth,proto3" json:"session_health,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1495,6 +1560,135 @@ func (x *Heartbeat) GetState() SessionState {
 	return SessionState_SESSION_STATE_UNSPECIFIED
 }
 
+func (x *Heartbeat) GetSessionHealth() *SessionHealth {
+	if x != nil {
+		return x.SessionHealth
+	}
+	return nil
+}
+
+// SessionHealth: snapshot operativo de una sesión del Edge (Plan 031, ADR-0023).
+// Todos sus campos son opcionales semánticamente: un colector que no pueda medir
+// alguno lo deja en su cero. Viaja adjunto al Heartbeat. Frontera zero-knowledge
+// (ADR-0007): SOLO metadatos de salud operativa. Aquí NUNCA van llaves privadas,
+// la DEK, credenciales, JIDs/números ni contenido de mensajes; solo señales para
+// operar la flota (~1000 Edges sin SSH).
+type SessionHealth struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Estado real del socket de WhatsApp (whatsmeow), con prueba de vida: no "el
+	// cliente existe" sino conectividad efectiva. Ver enum abajo.
+	WhatsappSocketState WhatsappSocketState `protobuf:"varint,1,opt,name=whatsapp_socket_state,json=whatsappSocketState,proto3,enum=wapp.cloudlink.v1.WhatsappSocketState" json:"whatsapp_socket_state,omitempty"`
+	// Motivo legible por máquina de una degradación (p. ej. "dek_load_timeout",
+	// "dial_timeout"). Vacío si no hay degradación. Es un código operativo, no PII.
+	DegradedReason string `protobuf:"bytes,2,opt,name=degraded_reason,json=degradedReason,proto3" json:"degraded_reason,omitempty"`
+	// Edad en segundos del último evento entrante procesado (prueba de vida del
+	// socket receptor). 0 si aún no se ha recibido ninguno.
+	LastInboundEventAgeS int64 `protobuf:"varint,3,opt,name=last_inbound_event_age_s,json=lastInboundEventAgeS,proto3" json:"last_inbound_event_age_s,omitempty"`
+	// Duración en milisegundos de la última carga de la DEK (T6: detecta Keychain
+	// lento). Es una métrica de tiempo; NO expone la DEK ni su material.
+	DekLoadDurationMs int64 `protobuf:"varint,4,opt,name=dek_load_duration_ms,json=dekLoadDurationMs,proto3" json:"dek_load_duration_ms,omitempty"`
+	// Estado del circuito del clasificador de intenciones local (Plan 029): uno de
+	// "closed" | "open" | "half_open". Vacío si la pieza 06 (intents) no está
+	// activa en este Edge. String por ser opcional y desacoplado del 029.
+	IntentCircuit string `protobuf:"bytes,5,opt,name=intent_circuit,json=intentCircuit,proto3" json:"intent_circuit,omitempty"`
+	// Profundidad actual del outbox SQLite (ADR-0003): mensajes salientes pendientes
+	// de drenar. Señal de saturación/desconexión.
+	OutboxDepth int64 `protobuf:"varint,6,opt,name=outbox_depth,json=outboxDepth,proto3" json:"outbox_depth,omitempty"`
+	// Versión del binario del Edge inyectada en build (trazabilidad de flota y base
+	// del auto-update del Plan 032). No es PII.
+	BinaryVersion string `protobuf:"bytes,7,opt,name=binary_version,json=binaryVersion,proto3" json:"binary_version,omitempty"`
+	// Tiempo en segundos que lleva vivo el daemon del Edge (uptime del proceso).
+	DaemonUptimeS int64 `protobuf:"varint,8,opt,name=daemon_uptime_s,json=daemonUptimeS,proto3" json:"daemon_uptime_s,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionHealth) Reset() {
+	*x = SessionHealth{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionHealth) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionHealth) ProtoMessage() {}
+
+func (x *SessionHealth) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionHealth.ProtoReflect.Descriptor instead.
+func (*SessionHealth) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SessionHealth) GetWhatsappSocketState() WhatsappSocketState {
+	if x != nil {
+		return x.WhatsappSocketState
+	}
+	return WhatsappSocketState_WHATSAPP_SOCKET_STATE_UNSPECIFIED
+}
+
+func (x *SessionHealth) GetDegradedReason() string {
+	if x != nil {
+		return x.DegradedReason
+	}
+	return ""
+}
+
+func (x *SessionHealth) GetLastInboundEventAgeS() int64 {
+	if x != nil {
+		return x.LastInboundEventAgeS
+	}
+	return 0
+}
+
+func (x *SessionHealth) GetDekLoadDurationMs() int64 {
+	if x != nil {
+		return x.DekLoadDurationMs
+	}
+	return 0
+}
+
+func (x *SessionHealth) GetIntentCircuit() string {
+	if x != nil {
+		return x.IntentCircuit
+	}
+	return ""
+}
+
+func (x *SessionHealth) GetOutboxDepth() int64 {
+	if x != nil {
+		return x.OutboxDepth
+	}
+	return 0
+}
+
+func (x *SessionHealth) GetBinaryVersion() string {
+	if x != nil {
+		return x.BinaryVersion
+	}
+	return ""
+}
+
+func (x *SessionHealth) GetDaemonUptimeS() int64 {
+	if x != nil {
+		return x.DaemonUptimeS
+	}
+	return 0
+}
+
 type Pong struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Nonce         int64                  `protobuf:"varint,1,opt,name=nonce,proto3" json:"nonce,omitempty"`
@@ -1504,7 +1698,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[16]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1516,7 +1710,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[16]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1529,7 +1723,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{16}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Pong) GetNonce() int64 {
@@ -1557,7 +1751,7 @@ type ConfigUpdate struct {
 
 func (x *ConfigUpdate) Reset() {
 	*x = ConfigUpdate{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[17]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1569,7 +1763,7 @@ func (x *ConfigUpdate) String() string {
 func (*ConfigUpdate) ProtoMessage() {}
 
 func (x *ConfigUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[17]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1582,7 +1776,7 @@ func (x *ConfigUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigUpdate.ProtoReflect.Descriptor instead.
 func (*ConfigUpdate) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{17}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ConfigUpdate) GetCommandId() string {
@@ -1727,12 +1921,22 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\x03Ack\x12(\n" +
 	"\x10acked_command_id\x18\x01 \x01(\tR\x0eackedCommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\x9b\x01\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xe4\x01\n" +
 	"\tHeartbeat\x12#\n" +
 	"\rlease_counter\x18\x01 \x01(\x03R\fleaseCounter\x12\x17\n" +
 	"\aself_pn\x18\x02 \x01(\tR\x06selfPn\x12\x19\n" +
 	"\bself_jid\x18\x03 \x01(\tR\aselfJid\x125\n" +
-	"\x05state\x18\x04 \x01(\x0e2\x1f.wapp.cloudlink.v1.SessionStateR\x05state\"\x1c\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x1f.wapp.cloudlink.v1.SessionStateR\x05state\x12G\n" +
+	"\x0esession_health\x18\x05 \x01(\v2 .wapp.cloudlink.v1.SessionHealthR\rsessionHealth\"\x96\x03\n" +
+	"\rSessionHealth\x12Z\n" +
+	"\x15whatsapp_socket_state\x18\x01 \x01(\x0e2&.wapp.cloudlink.v1.WhatsappSocketStateR\x13whatsappSocketState\x12'\n" +
+	"\x0fdegraded_reason\x18\x02 \x01(\tR\x0edegradedReason\x126\n" +
+	"\x18last_inbound_event_age_s\x18\x03 \x01(\x03R\x14lastInboundEventAgeS\x12/\n" +
+	"\x14dek_load_duration_ms\x18\x04 \x01(\x03R\x11dekLoadDurationMs\x12%\n" +
+	"\x0eintent_circuit\x18\x05 \x01(\tR\rintentCircuit\x12!\n" +
+	"\foutbox_depth\x18\x06 \x01(\x03R\voutboxDepth\x12%\n" +
+	"\x0ebinary_version\x18\a \x01(\tR\rbinaryVersion\x12&\n" +
+	"\x0fdaemon_uptime_s\x18\b \x01(\x03R\rdaemonUptimeS\"\x1c\n" +
 	"\x04Pong\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\x03R\x05nonce\"\x94\x01\n" +
 	"\fConfigUpdate\x12\x1d\n" +
@@ -1750,7 +1954,13 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\rReceiptStatus\x12\x1e\n" +
 	"\x1aRECEIPT_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18RECEIPT_STATUS_DELIVERED\x10\x01\x12\x17\n" +
-	"\x13RECEIPT_STATUS_READ\x10\x02*K\n" +
+	"\x13RECEIPT_STATUS_READ\x10\x02*\xcb\x01\n" +
+	"\x13WhatsappSocketState\x12%\n" +
+	"!WHATSAPP_SOCKET_STATE_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fWHATSAPP_SOCKET_STATE_CONNECTED\x10\x01\x12$\n" +
+	" WHATSAPP_SOCKET_STATE_CONNECTING\x10\x02\x12\"\n" +
+	"\x1eWHATSAPP_SOCKET_STATE_DEGRADED\x10\x03\x12\x1e\n" +
+	"\x1aWHATSAPP_SOCKET_STATE_DEAD\x10\x04*K\n" +
 	"\fSessionState\x12\x1d\n" +
 	"\x19SESSION_STATE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18SESSION_STATE_LOGGED_OUT\x10\x012g\n" +
@@ -1773,60 +1983,64 @@ func file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP() []byte {
 	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescData
 }
 
-var file_wapp_cloudlink_v1_cloudlink_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_wapp_cloudlink_v1_cloudlink_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
 	(MediaKind)(0),             // 0: wapp.cloudlink.v1.MediaKind
 	(ReceiptStatus)(0),         // 1: wapp.cloudlink.v1.ReceiptStatus
-	(SessionState)(0),          // 2: wapp.cloudlink.v1.SessionState
-	(*EnrollEdgeRequest)(nil),  // 3: wapp.cloudlink.v1.EnrollEdgeRequest
-	(*EnrollEdgeResponse)(nil), // 4: wapp.cloudlink.v1.EnrollEdgeResponse
-	(*CloudToEdge)(nil),        // 5: wapp.cloudlink.v1.CloudToEdge
-	(*EdgeToCloud)(nil),        // 6: wapp.cloudlink.v1.EdgeToCloud
-	(*SendText)(nil),           // 7: wapp.cloudlink.v1.SendText
-	(*SendMedia)(nil),          // 8: wapp.cloudlink.v1.SendMedia
-	(*RunFlowStep)(nil),        // 9: wapp.cloudlink.v1.RunFlowStep
-	(*LeaseUpdate)(nil),        // 10: wapp.cloudlink.v1.LeaseUpdate
-	(*Ping)(nil),               // 11: wapp.cloudlink.v1.Ping
-	(*IncomingMessage)(nil),    // 12: wapp.cloudlink.v1.IncomingMessage
-	(*SensitivePayload)(nil),   // 13: wapp.cloudlink.v1.SensitivePayload
-	(*ClassifiedIntent)(nil),   // 14: wapp.cloudlink.v1.ClassifiedIntent
-	(*DeliveryStatus)(nil),     // 15: wapp.cloudlink.v1.DeliveryStatus
-	(*MessageReceipt)(nil),     // 16: wapp.cloudlink.v1.MessageReceipt
-	(*Ack)(nil),                // 17: wapp.cloudlink.v1.Ack
-	(*Heartbeat)(nil),          // 18: wapp.cloudlink.v1.Heartbeat
-	(*Pong)(nil),               // 19: wapp.cloudlink.v1.Pong
-	(*ConfigUpdate)(nil),       // 20: wapp.cloudlink.v1.ConfigUpdate
-	nil,                        // 21: wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
+	(WhatsappSocketState)(0),   // 2: wapp.cloudlink.v1.WhatsappSocketState
+	(SessionState)(0),          // 3: wapp.cloudlink.v1.SessionState
+	(*EnrollEdgeRequest)(nil),  // 4: wapp.cloudlink.v1.EnrollEdgeRequest
+	(*EnrollEdgeResponse)(nil), // 5: wapp.cloudlink.v1.EnrollEdgeResponse
+	(*CloudToEdge)(nil),        // 6: wapp.cloudlink.v1.CloudToEdge
+	(*EdgeToCloud)(nil),        // 7: wapp.cloudlink.v1.EdgeToCloud
+	(*SendText)(nil),           // 8: wapp.cloudlink.v1.SendText
+	(*SendMedia)(nil),          // 9: wapp.cloudlink.v1.SendMedia
+	(*RunFlowStep)(nil),        // 10: wapp.cloudlink.v1.RunFlowStep
+	(*LeaseUpdate)(nil),        // 11: wapp.cloudlink.v1.LeaseUpdate
+	(*Ping)(nil),               // 12: wapp.cloudlink.v1.Ping
+	(*IncomingMessage)(nil),    // 13: wapp.cloudlink.v1.IncomingMessage
+	(*SensitivePayload)(nil),   // 14: wapp.cloudlink.v1.SensitivePayload
+	(*ClassifiedIntent)(nil),   // 15: wapp.cloudlink.v1.ClassifiedIntent
+	(*DeliveryStatus)(nil),     // 16: wapp.cloudlink.v1.DeliveryStatus
+	(*MessageReceipt)(nil),     // 17: wapp.cloudlink.v1.MessageReceipt
+	(*Ack)(nil),                // 18: wapp.cloudlink.v1.Ack
+	(*Heartbeat)(nil),          // 19: wapp.cloudlink.v1.Heartbeat
+	(*SessionHealth)(nil),      // 20: wapp.cloudlink.v1.SessionHealth
+	(*Pong)(nil),               // 21: wapp.cloudlink.v1.Pong
+	(*ConfigUpdate)(nil),       // 22: wapp.cloudlink.v1.ConfigUpdate
+	nil,                        // 23: wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
 }
 var file_wapp_cloudlink_v1_cloudlink_proto_depIdxs = []int32{
-	7,  // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
-	8,  // 1: wapp.cloudlink.v1.CloudToEdge.send_media:type_name -> wapp.cloudlink.v1.SendMedia
-	9,  // 2: wapp.cloudlink.v1.CloudToEdge.run_flow_step:type_name -> wapp.cloudlink.v1.RunFlowStep
-	10, // 3: wapp.cloudlink.v1.CloudToEdge.lease_update:type_name -> wapp.cloudlink.v1.LeaseUpdate
-	11, // 4: wapp.cloudlink.v1.CloudToEdge.ping:type_name -> wapp.cloudlink.v1.Ping
-	20, // 5: wapp.cloudlink.v1.CloudToEdge.config_update:type_name -> wapp.cloudlink.v1.ConfigUpdate
-	12, // 6: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
-	15, // 7: wapp.cloudlink.v1.EdgeToCloud.delivery:type_name -> wapp.cloudlink.v1.DeliveryStatus
-	17, // 8: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
-	18, // 9: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
-	19, // 10: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
-	16, // 11: wapp.cloudlink.v1.EdgeToCloud.receipt:type_name -> wapp.cloudlink.v1.MessageReceipt
+	8,  // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
+	9,  // 1: wapp.cloudlink.v1.CloudToEdge.send_media:type_name -> wapp.cloudlink.v1.SendMedia
+	10, // 2: wapp.cloudlink.v1.CloudToEdge.run_flow_step:type_name -> wapp.cloudlink.v1.RunFlowStep
+	11, // 3: wapp.cloudlink.v1.CloudToEdge.lease_update:type_name -> wapp.cloudlink.v1.LeaseUpdate
+	12, // 4: wapp.cloudlink.v1.CloudToEdge.ping:type_name -> wapp.cloudlink.v1.Ping
+	22, // 5: wapp.cloudlink.v1.CloudToEdge.config_update:type_name -> wapp.cloudlink.v1.ConfigUpdate
+	13, // 6: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
+	16, // 7: wapp.cloudlink.v1.EdgeToCloud.delivery:type_name -> wapp.cloudlink.v1.DeliveryStatus
+	18, // 8: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
+	19, // 9: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
+	21, // 10: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
+	17, // 11: wapp.cloudlink.v1.EdgeToCloud.receipt:type_name -> wapp.cloudlink.v1.MessageReceipt
 	0,  // 12: wapp.cloudlink.v1.SendMedia.kind:type_name -> wapp.cloudlink.v1.MediaKind
-	14, // 13: wapp.cloudlink.v1.IncomingMessage.intent:type_name -> wapp.cloudlink.v1.ClassifiedIntent
-	14, // 14: wapp.cloudlink.v1.SensitivePayload.intent:type_name -> wapp.cloudlink.v1.ClassifiedIntent
-	21, // 15: wapp.cloudlink.v1.ClassifiedIntent.params:type_name -> wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
+	15, // 13: wapp.cloudlink.v1.IncomingMessage.intent:type_name -> wapp.cloudlink.v1.ClassifiedIntent
+	15, // 14: wapp.cloudlink.v1.SensitivePayload.intent:type_name -> wapp.cloudlink.v1.ClassifiedIntent
+	23, // 15: wapp.cloudlink.v1.ClassifiedIntent.params:type_name -> wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
 	1,  // 16: wapp.cloudlink.v1.MessageReceipt.status:type_name -> wapp.cloudlink.v1.ReceiptStatus
-	2,  // 17: wapp.cloudlink.v1.Heartbeat.state:type_name -> wapp.cloudlink.v1.SessionState
-	3,  // 18: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
-	6,  // 19: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
-	4,  // 20: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
-	5,  // 21: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
-	20, // [20:22] is the sub-list for method output_type
-	18, // [18:20] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	3,  // 17: wapp.cloudlink.v1.Heartbeat.state:type_name -> wapp.cloudlink.v1.SessionState
+	20, // 18: wapp.cloudlink.v1.Heartbeat.session_health:type_name -> wapp.cloudlink.v1.SessionHealth
+	2,  // 19: wapp.cloudlink.v1.SessionHealth.whatsapp_socket_state:type_name -> wapp.cloudlink.v1.WhatsappSocketState
+	4,  // 20: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
+	7,  // 21: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
+	5,  // 22: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
+	6,  // 23: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
+	22, // [22:24] is the sub-list for method output_type
+	20, // [20:22] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_wapp_cloudlink_v1_cloudlink_proto_init() }
@@ -1859,8 +2073,8 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc), len(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   19,
+			NumEnums:      4,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
