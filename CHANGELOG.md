@@ -6,8 +6,9 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
-Cambios aditivos y compatibles hacia atrás con `v0.7.0` (Plan 029, Ola 0). El
-tag `v0.8.0` se cortará al publicar.
+## [0.8.0] - 2026-07-11
+
+Cambios aditivos y compatibles hacia atrás con `v0.7.0` (Plan 029, Ola 0).
 
 ### Added
 
@@ -32,6 +33,6 @@ tag `v0.8.0` se cortará al publicar.
   `v0.7.0` parsea un `CloudToEdge{ConfigUpdate}` sin error (oneof desconocido,
   frame retenido como unknown field).
 
-## [0.7.0]
+## [0.7.0] y anteriores
 
 Ver historial de tags para las versiones publicadas previas (`v0.1.0`–`v0.7.0`).
