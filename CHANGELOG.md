@@ -6,9 +6,10 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-11
+
 Cambios aditivos y compatibles hacia atrás con `v0.8.0` (Plan 031, Ola 0 —
-telemetría de salud de flota + diagnóstico remoto, ADR-0023). Sin release cortada
-todavía.
+telemetría de salud de flota + diagnóstico remoto, ADR-0023).
 
 ### Added
 
