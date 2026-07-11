@@ -53,7 +53,7 @@ type Option func(*Server)
 
 // WithEnroller inyecta el servicio de enrolamiento en el enrollmentService.
 func WithEnroller(e Enroller) Option {
-	return func(s *Server) { s.enrollmentService.enroller = e }
+	return func(s *Server) { s.enroller = e }
 }
 
 // WithInboxCapacity fija el tamaño del buffer acotado de recepción por sesión
@@ -62,7 +62,7 @@ func WithEnroller(e Enroller) Option {
 func WithInboxCapacity(n int) Option {
 	return func(s *Server) {
 		if n > 0 {
-			s.cloudlinkService.inboxCap = n
+			s.inboxCap = n
 		}
 	}
 }
@@ -72,7 +72,7 @@ func WithInboxCapacity(n int) Option {
 // para loguear/exportar métrica. Debe ser rápido y no bloquear (corre en el path
 // de recepción).
 func WithSaturationHook(fn func(sessionID string, dropped uint64)) Option {
-	return func(s *Server) { s.cloudlinkService.onSaturation = fn }
+	return func(s *Server) { s.onSaturation = fn }
 }
 
 // WithLeaseRenewal habilita la renovación del lease anclada al Heartbeat: cuando
@@ -86,8 +86,8 @@ func WithSaturationHook(fn func(sessionID string, dropped uint64)) Option {
 // adelante).
 func WithLeaseRenewal(issuer LeaseIssuer, ttl time.Duration) Option {
 	return func(s *Server) {
-		s.cloudlinkService.leaseIssuer = issuer
-		s.cloudlinkService.leaseTTL = ttl
+		s.leaseIssuer = issuer
+		s.leaseTTL = ttl
 	}
 }
 
