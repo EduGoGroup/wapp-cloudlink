@@ -41,6 +41,7 @@ message CloudToEdge {
     LeaseUpdate lease_update = 13;
     Ping ping = 14;
     ConfigUpdate config_update = 15;
+    DiagnosticsRequest diagnostics_request = 16;
   }
 }
 
@@ -55,6 +56,7 @@ message EdgeToCloud {
     Heartbeat heartbeat = 13;
     Pong pong = 14;
     MessageReceipt receipt = 15;
+    DiagnosticsBundle diagnostics_bundle = 16;
   }
 }
 
@@ -190,6 +192,57 @@ message Heartbeat {
   // que WhatsApp cerró el dispositivo (LoggedOut): el Cloud debe marcar la sesión
   // como zombie/loggedout, distinta de un offline por caída de red.
   SessionState state = 4;
+  // T1 (Plan 031, telemetría de salud): snapshot operativo de la sesión adjunto
+  // al mismo frame que dispara MarkOnline. OPCIONAL: los Edges antiguos no lo
+  // envían y el Cloud debe tratar su ausencia como "sin datos de salud" (no como
+  // salud mala). Separa el registro CloudLink (link_state) de la salud real del
+  // socket de WhatsApp. Frontera zero-knowledge (ADR-0007): SOLO metadatos
+  // operativos; JAMÁS llaves, DEK, credenciales ni contenido de mensajes.
+  SessionHealth session_health = 5;
+}
+
+// SessionHealth: snapshot operativo de una sesión del Edge (Plan 031, ADR-0023).
+// Todos sus campos son opcionales semánticamente: un colector que no pueda medir
+// alguno lo deja en su cero. Viaja adjunto al Heartbeat. Frontera zero-knowledge
+// (ADR-0007): SOLO metadatos de salud operativa. Aquí NUNCA van llaves privadas,
+// la DEK, credenciales, JIDs/números ni contenido de mensajes; solo señales para
+// operar la flota (~1000 Edges sin SSH).
+message SessionHealth {
+  // Estado real del socket de WhatsApp (whatsmeow), con prueba de vida: no "el
+  // cliente existe" sino conectividad efectiva. Ver enum abajo.
+  WhatsappSocketState whatsapp_socket_state = 1;
+  // Motivo legible por máquina de una degradación (p. ej. "dek_load_timeout",
+  // "dial_timeout"). Vacío si no hay degradación. Es un código operativo, no PII.
+  string degraded_reason = 2;
+  // Edad en segundos del último evento entrante procesado (prueba de vida del
+  // socket receptor). 0 si aún no se ha recibido ninguno.
+  int64 last_inbound_event_age_s = 3;
+  // Duración en milisegundos de la última carga de la DEK (T6: detecta Keychain
+  // lento). Es una métrica de tiempo; NO expone la DEK ni su material.
+  int64 dek_load_duration_ms = 4;
+  // Estado del circuito del clasificador de intenciones local (Plan 029): uno de
+  // "closed" | "open" | "half_open". Vacío si la pieza 06 (intents) no está
+  // activa en este Edge. String por ser opcional y desacoplado del 029.
+  string intent_circuit = 5;
+  // Profundidad actual del outbox SQLite (ADR-0003): mensajes salientes pendientes
+  // de drenar. Señal de saturación/desconexión.
+  int64 outbox_depth = 6;
+  // Versión del binario del Edge inyectada en build (trazabilidad de flota y base
+  // del auto-update del Plan 032). No es PII.
+  string binary_version = 7;
+  // Tiempo en segundos que lleva vivo el daemon del Edge (uptime del proceso).
+  int64 daemon_uptime_s = 8;
+}
+
+// WhatsappSocketState: estado del socket de WhatsApp reportado por el Edge con
+// prueba de vida (Plan 031). Aditivo/no-breaking: valores nuevos SIEMPRE al
+// final. UNSPECIFIED = el Edge no reporta salud del socket (compat).
+enum WhatsappSocketState {
+  WHATSAPP_SOCKET_STATE_UNSPECIFIED = 0; // sin dato de salud (Edge antiguo / no medido)
+  WHATSAPP_SOCKET_STATE_CONNECTED = 1;   // socket vivo y conectado (IsConnected + prueba de vida)
+  WHATSAPP_SOCKET_STATE_CONNECTING = 2;  // conectando/reconectando (backoff en curso)
+  WHATSAPP_SOCKET_STATE_DEGRADED = 3;    // vivo pero degradado (ver degraded_reason)
+  WHATSAPP_SOCKET_STATE_DEAD = 4;        // socket caído/inoperante
 }
 
 // Estado de sesión reportado por el Edge en el Heartbeat (Plan 020, T3). Aditivo
@@ -214,4 +267,34 @@ message ConfigUpdate {
   string kind = 3; // tipo de configuración (p.ej. "intents")
   string version = 4; // versión del contenido, para idempotencia/trazabilidad
   bytes payload = 5; // contenido serializado propio del kind
+}
+
+// DiagnosticsRequest: la nube pide bajo demanda un paquete de diagnóstico a un
+// Edge (Plan 031, ADR-0023). Diagnóstico remoto de una flota sin SSH. El Edge
+// responde con un DiagnosticsBundle correlacionado por command_id (patrón
+// ConfigUpdate: Ack + idempotencia por command_id). Solo metadatos operativos.
+message DiagnosticsRequest {
+  string command_id = 1; // correlación con el Ack y con el DiagnosticsBundle de respuesta
+  string session_id = 2;  // sesión objetivo (multiplexado); vacío = alcance del Edge completo
+  // Alcance del diagnóstico pedido (p. ej. "full", "logs", "goroutines",
+  // "subsystems"). String por extensibilidad; el Edge ignora un scope que no
+  // reconozca y devuelve lo que sepa (compat aditiva).
+  string scope = 3;
+}
+
+// DiagnosticsBundle: respuesta del Edge a un DiagnosticsRequest (Plan 031). Sube
+// por EdgeToCloud correlacionado por command_id. Frontera zero-knowledge dura
+// (ADR-0007): SOLO material operativo de diagnóstico; el Edge DEBE sanear antes
+// de enviar — JAMÁS llaves, DEK, credenciales, tokens ni contenido de mensajes,
+// ni en logs ni en dumps (el Plan 031 T8 añade un gate que escanea el bundle).
+//
+// Tope de tamaño: el transporte ya impone un máximo de 4 MiB por frame gRPC. El
+// bundle DEBE caber en ese límite; el Edge trunca en origen (ring buffer de N
+// líneas de log, dump acotado) antes de enviar. Si un futuro diagnóstico no
+// cupiera, se trocearía por command_id — hoy no hace falta.
+message DiagnosticsBundle {
+  string command_id = 1;     // correlación con el DiagnosticsRequest que lo originó
+  string log_tail = 2;       // últimas N líneas del ring buffer de logs (ya saneadas, truncadas en origen)
+  string goroutine_dump = 3; // volcado de goroutines (runtime.Stack(all=true)), truncado en origen
+  string subsystems_json = 4; // snapshot JSON de subsistemas (intent/status y pares); metadatos operativos, no PII
 }
