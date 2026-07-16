@@ -42,6 +42,11 @@ message CloudToEdge {
     Ping ping = 14;
     ConfigUpdate config_update = 15;
     DiagnosticsRequest diagnostics_request = 16;
+    // Plan 033 / ADR-0025: respuesta única de autenticación de usuario del
+    // operador del Edge. Sirve a los tres request (login/refresh/logout),
+    // correlacionada por command_id. El Edge relaya credenciales→IAM; el
+    // tenant es implícito del canal mTLS (no viaja en el mensaje).
+    UserAuthResponse user_auth_response = 17;
   }
 }
 
@@ -57,6 +62,13 @@ message EdgeToCloud {
     Pong pong = 14;
     MessageReceipt receipt = 15;
     DiagnosticsBundle diagnostics_bundle = 16;
+    // Plan 033 / ADR-0025: peticiones de autenticación de usuario del operador
+    // del Edge. El Edge relaya las credenciales hacia el IAM de la nube por el
+    // stream bidi existente; el tenant es implícito del canal mTLS (NO va en el
+    // mensaje). Todas se correlacionan con un UserAuthResponse por command_id.
+    UserLoginRequest user_login = 17;
+    UserRefreshRequest user_refresh = 18;
+    UserLogoutRequest user_logout = 19;
   }
 }
 
@@ -297,4 +309,71 @@ message DiagnosticsBundle {
   string log_tail = 2;       // últimas N líneas del ring buffer de logs (ya saneadas, truncadas en origen)
   string goroutine_dump = 3; // volcado de goroutines (runtime.Stack(all=true)), truncado en origen
   string subsystems_json = 4; // snapshot JSON de subsistemas (intent/status y pares); metadatos operativos, no PII
+}
+
+// UserLoginRequest: login del operador del Edge contra el IAM de la nube (Plan
+// 033 / ADR-0025). Sube por EdgeToCloud; el Edge relaya las credenciales sin
+// custodiarlas. El tenant NO viaja aquí: es implícito del canal mTLS. La nube
+// responde con un UserAuthResponse correlacionado por command_id (patrón
+// ConfigUpdate/Diagnostics: request/response por command_id).
+message UserLoginRequest {
+  string command_id = 1; // correlación con el UserAuthResponse
+  string session_id = 2; // sesión/contexto del Edge (multiplexado); puede ir vacío
+  string email = 3;      // credencial del operador (relayada al IAM)
+  string password = 4;   // credencial del operador (relayada al IAM; nunca se persiste en el Edge)
+}
+
+// UserRefreshRequest: renovación del par de tokens del operador (Plan 033 /
+// ADR-0025). El Edge presenta el refresh_token vigente y la nube responde con
+// un UserAuthResponse (tokens nuevos o error tipado) por command_id.
+message UserRefreshRequest {
+  string command_id = 1;    // correlación con el UserAuthResponse
+  string session_id = 2;    // sesión/contexto del Edge (multiplexado); puede ir vacío
+  string refresh_token = 3; // refresh token a canjear en el IAM
+}
+
+// UserLogoutRequest: cierre de sesión del operador (Plan 033 / ADR-0025). La
+// nube revoca el refresh_token indicado (o todas las sesiones del usuario si
+// all_sessions=true) y responde con un UserAuthResponse por command_id. El
+// éxito se modela con la rama tokens vacía (UserTokens sin campos) => ok sin
+// credenciales nuevas; un fallo llega por la rama error.
+message UserLogoutRequest {
+  string command_id = 1;    // correlación con el UserAuthResponse
+  string session_id = 2;    // sesión/contexto del Edge (multiplexado); puede ir vacío
+  string refresh_token = 3; // refresh token a revocar
+  bool all_sessions = 4;    // true = revocar todas las sesiones activas del usuario
+}
+
+// UserAuthResponse: respuesta única de autenticación de usuario (Plan 033 /
+// ADR-0025). Sirve a UserLoginRequest, UserRefreshRequest y UserLogoutRequest,
+// correlacionada por command_id. Baja por CloudToEdge. El oneof result separa
+// el caso exitoso (tokens) del error tipado (error). Para un logout exitoso,
+// result lleva un UserTokens vacío (ok sin credenciales nuevas).
+message UserAuthResponse {
+  string command_id = 1; // correlación con el request de auth que lo originó
+  string session_id = 2; // eco de la sesión/contexto del request
+  oneof result {
+    UserTokens tokens = 3; // login/refresh ok (con tokens); logout ok (vacío)
+    UserAuthError error = 4; // fallo tipado (ver code)
+  }
+}
+
+// UserTokens: par de tokens emitido por el IAM (Plan 033 / ADR-0025). Espeja
+// domain.AuthResult del IAM (AccessToken/RefreshToken/TokenType/ExpiresAt). En
+// un logout exitoso viaja vacío (todos los campos en su cero) para señalar ok
+// sin credenciales nuevas.
+message UserTokens {
+  string access_token = 1;  // JWT de acceso
+  string refresh_token = 2; // token de refresco
+  string token_type = 3;    // p.ej. "Bearer"
+  int64 expires_at = 4;     // epoch de expiración del access_token
+}
+
+// UserAuthError: error tipado de autenticación de usuario (Plan 033 /
+// ADR-0025). code mapea los errores tipados del IAM (ErrInvalidCredentials,
+// ErrUserInactive, ErrRefreshInvalid, ErrInvalidInput, y tenant-cruzado) para
+// que el Edge decida sin parsear message (que es texto legible, no contrato).
+message UserAuthError {
+  string code = 1;    // código estable del error del IAM (contrato)
+  string message = 2; // detalle legible para humanos (no es contrato)
 }
