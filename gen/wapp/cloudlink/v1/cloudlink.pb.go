@@ -362,6 +362,7 @@ type CloudToEdge struct {
 	//	*CloudToEdge_Ping
 	//	*CloudToEdge_ConfigUpdate
 	//	*CloudToEdge_DiagnosticsRequest
+	//	*CloudToEdge_UserAuthResponse
 	Payload       isCloudToEdge_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -481,6 +482,15 @@ func (x *CloudToEdge) GetDiagnosticsRequest() *DiagnosticsRequest {
 	return nil
 }
 
+func (x *CloudToEdge) GetUserAuthResponse() *UserAuthResponse {
+	if x != nil {
+		if x, ok := x.Payload.(*CloudToEdge_UserAuthResponse); ok {
+			return x.UserAuthResponse
+		}
+	}
+	return nil
+}
+
 type isCloudToEdge_Payload interface {
 	isCloudToEdge_Payload()
 }
@@ -513,6 +523,14 @@ type CloudToEdge_DiagnosticsRequest struct {
 	DiagnosticsRequest *DiagnosticsRequest `protobuf:"bytes,16,opt,name=diagnostics_request,json=diagnosticsRequest,proto3,oneof"`
 }
 
+type CloudToEdge_UserAuthResponse struct {
+	// Plan 033 / ADR-0025: respuesta única de autenticación de usuario del
+	// operador del Edge. Sirve a los tres request (login/refresh/logout),
+	// correlacionada por command_id. El Edge relaya credenciales→IAM; el
+	// tenant es implícito del canal mTLS (no viaja en el mensaje).
+	UserAuthResponse *UserAuthResponse `protobuf:"bytes,17,opt,name=user_auth_response,json=userAuthResponse,proto3,oneof"`
+}
+
 func (*CloudToEdge_SendText) isCloudToEdge_Payload() {}
 
 func (*CloudToEdge_SendMedia) isCloudToEdge_Payload() {}
@@ -526,6 +544,8 @@ func (*CloudToEdge_Ping) isCloudToEdge_Payload() {}
 func (*CloudToEdge_ConfigUpdate) isCloudToEdge_Payload() {}
 
 func (*CloudToEdge_DiagnosticsRequest) isCloudToEdge_Payload() {}
+
+func (*CloudToEdge_UserAuthResponse) isCloudToEdge_Payload() {}
 
 // Eventos/estados edge -> cloud.
 type EdgeToCloud struct {
@@ -541,6 +561,9 @@ type EdgeToCloud struct {
 	//	*EdgeToCloud_Pong
 	//	*EdgeToCloud_Receipt
 	//	*EdgeToCloud_DiagnosticsBundle
+	//	*EdgeToCloud_UserLogin
+	//	*EdgeToCloud_UserRefresh
+	//	*EdgeToCloud_UserLogout
 	Payload       isEdgeToCloud_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -660,6 +683,33 @@ func (x *EdgeToCloud) GetDiagnosticsBundle() *DiagnosticsBundle {
 	return nil
 }
 
+func (x *EdgeToCloud) GetUserLogin() *UserLoginRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*EdgeToCloud_UserLogin); ok {
+			return x.UserLogin
+		}
+	}
+	return nil
+}
+
+func (x *EdgeToCloud) GetUserRefresh() *UserRefreshRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*EdgeToCloud_UserRefresh); ok {
+			return x.UserRefresh
+		}
+	}
+	return nil
+}
+
+func (x *EdgeToCloud) GetUserLogout() *UserLogoutRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*EdgeToCloud_UserLogout); ok {
+			return x.UserLogout
+		}
+	}
+	return nil
+}
+
 type isEdgeToCloud_Payload interface {
 	isEdgeToCloud_Payload()
 }
@@ -692,6 +742,22 @@ type EdgeToCloud_DiagnosticsBundle struct {
 	DiagnosticsBundle *DiagnosticsBundle `protobuf:"bytes,16,opt,name=diagnostics_bundle,json=diagnosticsBundle,proto3,oneof"`
 }
 
+type EdgeToCloud_UserLogin struct {
+	// Plan 033 / ADR-0025: peticiones de autenticación de usuario del operador
+	// del Edge. El Edge relaya las credenciales hacia el IAM de la nube por el
+	// stream bidi existente; el tenant es implícito del canal mTLS (NO va en el
+	// mensaje). Todas se correlacionan con un UserAuthResponse por command_id.
+	UserLogin *UserLoginRequest `protobuf:"bytes,17,opt,name=user_login,json=userLogin,proto3,oneof"`
+}
+
+type EdgeToCloud_UserRefresh struct {
+	UserRefresh *UserRefreshRequest `protobuf:"bytes,18,opt,name=user_refresh,json=userRefresh,proto3,oneof"`
+}
+
+type EdgeToCloud_UserLogout struct {
+	UserLogout *UserLogoutRequest `protobuf:"bytes,19,opt,name=user_logout,json=userLogout,proto3,oneof"`
+}
+
 func (*EdgeToCloud_Incoming) isEdgeToCloud_Payload() {}
 
 func (*EdgeToCloud_Delivery) isEdgeToCloud_Payload() {}
@@ -705,6 +771,12 @@ func (*EdgeToCloud_Pong) isEdgeToCloud_Payload() {}
 func (*EdgeToCloud_Receipt) isEdgeToCloud_Payload() {}
 
 func (*EdgeToCloud_DiagnosticsBundle) isEdgeToCloud_Payload() {}
+
+func (*EdgeToCloud_UserLogin) isEdgeToCloud_Payload() {}
+
+func (*EdgeToCloud_UserRefresh) isEdgeToCloud_Payload() {}
+
+func (*EdgeToCloud_UserLogout) isEdgeToCloud_Payload() {}
 
 type SendText struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1991,6 +2063,446 @@ func (x *DiagnosticsBundle) GetSubsystemsJson() string {
 	return ""
 }
 
+// UserLoginRequest: login del operador del Edge contra el IAM de la nube (Plan
+// 033 / ADR-0025). Sube por EdgeToCloud; el Edge relaya las credenciales sin
+// custodiarlas. El tenant NO viaja aquí: es implícito del canal mTLS. La nube
+// responde con un UserAuthResponse correlacionado por command_id (patrón
+// ConfigUpdate/Diagnostics: request/response por command_id).
+type UserLoginRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"` // correlación con el UserAuthResponse
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // sesión/contexto del Edge (multiplexado); puede ir vacío
+	Email         string                 `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`                          // credencial del operador (relayada al IAM)
+	Password      string                 `protobuf:"bytes,4,opt,name=password,proto3" json:"password,omitempty"`                    // credencial del operador (relayada al IAM; nunca se persiste en el Edge)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserLoginRequest) Reset() {
+	*x = UserLoginRequest{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserLoginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserLoginRequest) ProtoMessage() {}
+
+func (x *UserLoginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserLoginRequest.ProtoReflect.Descriptor instead.
+func (*UserLoginRequest) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *UserLoginRequest) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *UserLoginRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *UserLoginRequest) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *UserLoginRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+// UserRefreshRequest: renovación del par de tokens del operador (Plan 033 /
+// ADR-0025). El Edge presenta el refresh_token vigente y la nube responde con
+// un UserAuthResponse (tokens nuevos o error tipado) por command_id.
+type UserRefreshRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`          // correlación con el UserAuthResponse
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`          // sesión/contexto del Edge (multiplexado); puede ir vacío
+	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"` // refresh token a canjear en el IAM
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserRefreshRequest) Reset() {
+	*x = UserRefreshRequest{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserRefreshRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserRefreshRequest) ProtoMessage() {}
+
+func (x *UserRefreshRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserRefreshRequest.ProtoReflect.Descriptor instead.
+func (*UserRefreshRequest) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *UserRefreshRequest) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *UserRefreshRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *UserRefreshRequest) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
+// UserLogoutRequest: cierre de sesión del operador (Plan 033 / ADR-0025). La
+// nube revoca el refresh_token indicado (o todas las sesiones del usuario si
+// all_sessions=true) y responde con un UserAuthResponse por command_id. El
+// éxito se modela con la rama tokens vacía (UserTokens sin campos) => ok sin
+// credenciales nuevas; un fallo llega por la rama error.
+type UserLogoutRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`          // correlación con el UserAuthResponse
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`          // sesión/contexto del Edge (multiplexado); puede ir vacío
+	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"` // refresh token a revocar
+	AllSessions   bool                   `protobuf:"varint,4,opt,name=all_sessions,json=allSessions,proto3" json:"all_sessions,omitempty"`   // true = revocar todas las sesiones activas del usuario
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserLogoutRequest) Reset() {
+	*x = UserLogoutRequest{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserLogoutRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserLogoutRequest) ProtoMessage() {}
+
+func (x *UserLogoutRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserLogoutRequest.ProtoReflect.Descriptor instead.
+func (*UserLogoutRequest) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *UserLogoutRequest) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *UserLogoutRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *UserLogoutRequest) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
+func (x *UserLogoutRequest) GetAllSessions() bool {
+	if x != nil {
+		return x.AllSessions
+	}
+	return false
+}
+
+// UserAuthResponse: respuesta única de autenticación de usuario (Plan 033 /
+// ADR-0025). Sirve a UserLoginRequest, UserRefreshRequest y UserLogoutRequest,
+// correlacionada por command_id. Baja por CloudToEdge. El oneof result separa
+// el caso exitoso (tokens) del error tipado (error). Para un logout exitoso,
+// result lleva un UserTokens vacío (ok sin credenciales nuevas).
+type UserAuthResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"` // correlación con el request de auth que lo originó
+	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // eco de la sesión/contexto del request
+	// Types that are valid to be assigned to Result:
+	//
+	//	*UserAuthResponse_Tokens
+	//	*UserAuthResponse_Error
+	Result        isUserAuthResponse_Result `protobuf_oneof:"result"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserAuthResponse) Reset() {
+	*x = UserAuthResponse{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserAuthResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserAuthResponse) ProtoMessage() {}
+
+func (x *UserAuthResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserAuthResponse.ProtoReflect.Descriptor instead.
+func (*UserAuthResponse) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *UserAuthResponse) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *UserAuthResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *UserAuthResponse) GetResult() isUserAuthResponse_Result {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *UserAuthResponse) GetTokens() *UserTokens {
+	if x != nil {
+		if x, ok := x.Result.(*UserAuthResponse_Tokens); ok {
+			return x.Tokens
+		}
+	}
+	return nil
+}
+
+func (x *UserAuthResponse) GetError() *UserAuthError {
+	if x != nil {
+		if x, ok := x.Result.(*UserAuthResponse_Error); ok {
+			return x.Error
+		}
+	}
+	return nil
+}
+
+type isUserAuthResponse_Result interface {
+	isUserAuthResponse_Result()
+}
+
+type UserAuthResponse_Tokens struct {
+	Tokens *UserTokens `protobuf:"bytes,3,opt,name=tokens,proto3,oneof"` // login/refresh ok (con tokens); logout ok (vacío)
+}
+
+type UserAuthResponse_Error struct {
+	Error *UserAuthError `protobuf:"bytes,4,opt,name=error,proto3,oneof"` // fallo tipado (ver code)
+}
+
+func (*UserAuthResponse_Tokens) isUserAuthResponse_Result() {}
+
+func (*UserAuthResponse_Error) isUserAuthResponse_Result() {}
+
+// UserTokens: par de tokens emitido por el IAM (Plan 033 / ADR-0025). Espeja
+// domain.AuthResult del IAM (AccessToken/RefreshToken/TokenType/ExpiresAt). En
+// un logout exitoso viaja vacío (todos los campos en su cero) para señalar ok
+// sin credenciales nuevas.
+type UserTokens struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccessToken   string                 `protobuf:"bytes,1,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`    // JWT de acceso
+	RefreshToken  string                 `protobuf:"bytes,2,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"` // token de refresco
+	TokenType     string                 `protobuf:"bytes,3,opt,name=token_type,json=tokenType,proto3" json:"token_type,omitempty"`          // p.ej. "Bearer"
+	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`         // epoch de expiración del access_token
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserTokens) Reset() {
+	*x = UserTokens{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserTokens) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserTokens) ProtoMessage() {}
+
+func (x *UserTokens) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserTokens.ProtoReflect.Descriptor instead.
+func (*UserTokens) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *UserTokens) GetAccessToken() string {
+	if x != nil {
+		return x.AccessToken
+	}
+	return ""
+}
+
+func (x *UserTokens) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
+func (x *UserTokens) GetTokenType() string {
+	if x != nil {
+		return x.TokenType
+	}
+	return ""
+}
+
+func (x *UserTokens) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+// UserAuthError: error tipado de autenticación de usuario (Plan 033 /
+// ADR-0025). code mapea los errores tipados del IAM (ErrInvalidCredentials,
+// ErrUserInactive, ErrRefreshInvalid, ErrInvalidInput, y tenant-cruzado) para
+// que el Edge decida sin parsear message (que es texto legible, no contrato).
+type UserAuthError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`       // código estable del error del IAM (contrato)
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"` // detalle legible para humanos (no es contrato)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserAuthError) Reset() {
+	*x = UserAuthError{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserAuthError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserAuthError) ProtoMessage() {}
+
+func (x *UserAuthError) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserAuthError.ProtoReflect.Descriptor instead.
+func (*UserAuthError) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *UserAuthError) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *UserAuthError) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_wapp_cloudlink_v1_cloudlink_proto protoreflect.FileDescriptor
 
 const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
@@ -2004,7 +2516,7 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\fca_chain_pem\x18\x02 \x01(\fR\n" +
 	"caChainPem\x12\x1b\n" +
 	"\ttenant_id\x18\x03 \x01(\tR\btenantId\x12(\n" +
-	"\x10cloud_enc_pubkey\x18\x04 \x01(\fR\x0ecloudEncPubkey\"\xad\x04\n" +
+	"\x10cloud_enc_pubkey\x18\x04 \x01(\fR\x0ecloudEncPubkey\"\x82\x05\n" +
 	"\vCloudToEdge\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
@@ -2018,8 +2530,9 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\flease_update\x18\r \x01(\v2\x1e.wapp.cloudlink.v1.LeaseUpdateH\x00R\vleaseUpdate\x12-\n" +
 	"\x04ping\x18\x0e \x01(\v2\x17.wapp.cloudlink.v1.PingH\x00R\x04ping\x12F\n" +
 	"\rconfig_update\x18\x0f \x01(\v2\x1f.wapp.cloudlink.v1.ConfigUpdateH\x00R\fconfigUpdate\x12X\n" +
-	"\x13diagnostics_request\x18\x10 \x01(\v2%.wapp.cloudlink.v1.DiagnosticsRequestH\x00R\x12diagnosticsRequestB\t\n" +
-	"\apayload\"\x88\x04\n" +
+	"\x13diagnostics_request\x18\x10 \x01(\v2%.wapp.cloudlink.v1.DiagnosticsRequestH\x00R\x12diagnosticsRequest\x12S\n" +
+	"\x12user_auth_response\x18\x11 \x01(\v2#.wapp.cloudlink.v1.UserAuthResponseH\x00R\x10userAuthResponseB\t\n" +
+	"\apayload\"\xe3\x05\n" +
 	"\vEdgeToCloud\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
@@ -2032,7 +2545,12 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\theartbeat\x18\r \x01(\v2\x1c.wapp.cloudlink.v1.HeartbeatH\x00R\theartbeat\x12-\n" +
 	"\x04pong\x18\x0e \x01(\v2\x17.wapp.cloudlink.v1.PongH\x00R\x04pong\x12=\n" +
 	"\areceipt\x18\x0f \x01(\v2!.wapp.cloudlink.v1.MessageReceiptH\x00R\areceipt\x12U\n" +
-	"\x12diagnostics_bundle\x18\x10 \x01(\v2$.wapp.cloudlink.v1.DiagnosticsBundleH\x00R\x11diagnosticsBundleB\t\n" +
+	"\x12diagnostics_bundle\x18\x10 \x01(\v2$.wapp.cloudlink.v1.DiagnosticsBundleH\x00R\x11diagnosticsBundle\x12D\n" +
+	"\n" +
+	"user_login\x18\x11 \x01(\v2#.wapp.cloudlink.v1.UserLoginRequestH\x00R\tuserLogin\x12J\n" +
+	"\fuser_refresh\x18\x12 \x01(\v2%.wapp.cloudlink.v1.UserRefreshRequestH\x00R\vuserRefresh\x12G\n" +
+	"\vuser_logout\x18\x13 \x01(\v2$.wapp.cloudlink.v1.UserLogoutRequestH\x00R\n" +
+	"userLogoutB\t\n" +
 	"\apayload\".\n" +
 	"\bSendText\x12\x0e\n" +
 	"\x02to\x18\x01 \x01(\tR\x02to\x12\x12\n" +
@@ -2137,7 +2655,46 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x19\n" +
 	"\blog_tail\x18\x02 \x01(\tR\alogTail\x12%\n" +
 	"\x0egoroutine_dump\x18\x03 \x01(\tR\rgoroutineDump\x12'\n" +
-	"\x0fsubsystems_json\x18\x04 \x01(\tR\x0esubsystemsJson*V\n" +
+	"\x0fsubsystems_json\x18\x04 \x01(\tR\x0esubsystemsJson\"\x82\x01\n" +
+	"\x10UserLoginRequest\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05email\x18\x03 \x01(\tR\x05email\x12\x1a\n" +
+	"\bpassword\x18\x04 \x01(\tR\bpassword\"w\n" +
+	"\x12UserRefreshRequest\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12#\n" +
+	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\"\x99\x01\n" +
+	"\x11UserLogoutRequest\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12#\n" +
+	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12!\n" +
+	"\fall_sessions\x18\x04 \x01(\bR\vallSessions\"\xcd\x01\n" +
+	"\x10UserAuthResponse\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x127\n" +
+	"\x06tokens\x18\x03 \x01(\v2\x1d.wapp.cloudlink.v1.UserTokensH\x00R\x06tokens\x128\n" +
+	"\x05error\x18\x04 \x01(\v2 .wapp.cloudlink.v1.UserAuthErrorH\x00R\x05errorB\b\n" +
+	"\x06result\"\x92\x01\n" +
+	"\n" +
+	"UserTokens\x12!\n" +
+	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\x12#\n" +
+	"\rrefresh_token\x18\x02 \x01(\tR\frefreshToken\x12\x1d\n" +
+	"\n" +
+	"token_type\x18\x03 \x01(\tR\ttokenType\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\x03R\texpiresAt\"=\n" +
+	"\rUserAuthError\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage*V\n" +
 	"\tMediaKind\x12\x1a\n" +
 	"\x16MEDIA_KIND_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13MEDIA_KIND_DOCUMENT\x10\x01\x12\x14\n" +
@@ -2175,7 +2732,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP() []byte {
 }
 
 var file_wapp_cloudlink_v1_cloudlink_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
 	(MediaKind)(0),             // 0: wapp.cloudlink.v1.MediaKind
 	(ReceiptStatus)(0),         // 1: wapp.cloudlink.v1.ReceiptStatus
@@ -2202,7 +2759,13 @@ var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
 	(*ConfigUpdate)(nil),       // 22: wapp.cloudlink.v1.ConfigUpdate
 	(*DiagnosticsRequest)(nil), // 23: wapp.cloudlink.v1.DiagnosticsRequest
 	(*DiagnosticsBundle)(nil),  // 24: wapp.cloudlink.v1.DiagnosticsBundle
-	nil,                        // 25: wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
+	(*UserLoginRequest)(nil),   // 25: wapp.cloudlink.v1.UserLoginRequest
+	(*UserRefreshRequest)(nil), // 26: wapp.cloudlink.v1.UserRefreshRequest
+	(*UserLogoutRequest)(nil),  // 27: wapp.cloudlink.v1.UserLogoutRequest
+	(*UserAuthResponse)(nil),   // 28: wapp.cloudlink.v1.UserAuthResponse
+	(*UserTokens)(nil),         // 29: wapp.cloudlink.v1.UserTokens
+	(*UserAuthError)(nil),      // 30: wapp.cloudlink.v1.UserAuthError
+	nil,                        // 31: wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
 }
 var file_wapp_cloudlink_v1_cloudlink_proto_depIdxs = []int32{
 	8,  // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
@@ -2212,30 +2775,36 @@ var file_wapp_cloudlink_v1_cloudlink_proto_depIdxs = []int32{
 	12, // 4: wapp.cloudlink.v1.CloudToEdge.ping:type_name -> wapp.cloudlink.v1.Ping
 	22, // 5: wapp.cloudlink.v1.CloudToEdge.config_update:type_name -> wapp.cloudlink.v1.ConfigUpdate
 	23, // 6: wapp.cloudlink.v1.CloudToEdge.diagnostics_request:type_name -> wapp.cloudlink.v1.DiagnosticsRequest
-	13, // 7: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
-	16, // 8: wapp.cloudlink.v1.EdgeToCloud.delivery:type_name -> wapp.cloudlink.v1.DeliveryStatus
-	18, // 9: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
-	19, // 10: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
-	21, // 11: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
-	17, // 12: wapp.cloudlink.v1.EdgeToCloud.receipt:type_name -> wapp.cloudlink.v1.MessageReceipt
-	24, // 13: wapp.cloudlink.v1.EdgeToCloud.diagnostics_bundle:type_name -> wapp.cloudlink.v1.DiagnosticsBundle
-	0,  // 14: wapp.cloudlink.v1.SendMedia.kind:type_name -> wapp.cloudlink.v1.MediaKind
-	15, // 15: wapp.cloudlink.v1.IncomingMessage.intent:type_name -> wapp.cloudlink.v1.ClassifiedIntent
-	15, // 16: wapp.cloudlink.v1.SensitivePayload.intent:type_name -> wapp.cloudlink.v1.ClassifiedIntent
-	25, // 17: wapp.cloudlink.v1.ClassifiedIntent.params:type_name -> wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
-	1,  // 18: wapp.cloudlink.v1.MessageReceipt.status:type_name -> wapp.cloudlink.v1.ReceiptStatus
-	3,  // 19: wapp.cloudlink.v1.Heartbeat.state:type_name -> wapp.cloudlink.v1.SessionState
-	20, // 20: wapp.cloudlink.v1.Heartbeat.session_health:type_name -> wapp.cloudlink.v1.SessionHealth
-	2,  // 21: wapp.cloudlink.v1.SessionHealth.whatsapp_socket_state:type_name -> wapp.cloudlink.v1.WhatsappSocketState
-	4,  // 22: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
-	7,  // 23: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
-	5,  // 24: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
-	6,  // 25: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
-	24, // [24:26] is the sub-list for method output_type
-	22, // [22:24] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	28, // 7: wapp.cloudlink.v1.CloudToEdge.user_auth_response:type_name -> wapp.cloudlink.v1.UserAuthResponse
+	13, // 8: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
+	16, // 9: wapp.cloudlink.v1.EdgeToCloud.delivery:type_name -> wapp.cloudlink.v1.DeliveryStatus
+	18, // 10: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
+	19, // 11: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
+	21, // 12: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
+	17, // 13: wapp.cloudlink.v1.EdgeToCloud.receipt:type_name -> wapp.cloudlink.v1.MessageReceipt
+	24, // 14: wapp.cloudlink.v1.EdgeToCloud.diagnostics_bundle:type_name -> wapp.cloudlink.v1.DiagnosticsBundle
+	25, // 15: wapp.cloudlink.v1.EdgeToCloud.user_login:type_name -> wapp.cloudlink.v1.UserLoginRequest
+	26, // 16: wapp.cloudlink.v1.EdgeToCloud.user_refresh:type_name -> wapp.cloudlink.v1.UserRefreshRequest
+	27, // 17: wapp.cloudlink.v1.EdgeToCloud.user_logout:type_name -> wapp.cloudlink.v1.UserLogoutRequest
+	0,  // 18: wapp.cloudlink.v1.SendMedia.kind:type_name -> wapp.cloudlink.v1.MediaKind
+	15, // 19: wapp.cloudlink.v1.IncomingMessage.intent:type_name -> wapp.cloudlink.v1.ClassifiedIntent
+	15, // 20: wapp.cloudlink.v1.SensitivePayload.intent:type_name -> wapp.cloudlink.v1.ClassifiedIntent
+	31, // 21: wapp.cloudlink.v1.ClassifiedIntent.params:type_name -> wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
+	1,  // 22: wapp.cloudlink.v1.MessageReceipt.status:type_name -> wapp.cloudlink.v1.ReceiptStatus
+	3,  // 23: wapp.cloudlink.v1.Heartbeat.state:type_name -> wapp.cloudlink.v1.SessionState
+	20, // 24: wapp.cloudlink.v1.Heartbeat.session_health:type_name -> wapp.cloudlink.v1.SessionHealth
+	2,  // 25: wapp.cloudlink.v1.SessionHealth.whatsapp_socket_state:type_name -> wapp.cloudlink.v1.WhatsappSocketState
+	29, // 26: wapp.cloudlink.v1.UserAuthResponse.tokens:type_name -> wapp.cloudlink.v1.UserTokens
+	30, // 27: wapp.cloudlink.v1.UserAuthResponse.error:type_name -> wapp.cloudlink.v1.UserAuthError
+	4,  // 28: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
+	7,  // 29: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
+	5,  // 30: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
+	6,  // 31: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
+	30, // [30:32] is the sub-list for method output_type
+	28, // [28:30] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_wapp_cloudlink_v1_cloudlink_proto_init() }
@@ -2251,6 +2820,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 		(*CloudToEdge_Ping)(nil),
 		(*CloudToEdge_ConfigUpdate)(nil),
 		(*CloudToEdge_DiagnosticsRequest)(nil),
+		(*CloudToEdge_UserAuthResponse)(nil),
 	}
 	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[3].OneofWrappers = []any{
 		(*EdgeToCloud_Incoming)(nil),
@@ -2260,10 +2830,17 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 		(*EdgeToCloud_Pong)(nil),
 		(*EdgeToCloud_Receipt)(nil),
 		(*EdgeToCloud_DiagnosticsBundle)(nil),
+		(*EdgeToCloud_UserLogin)(nil),
+		(*EdgeToCloud_UserRefresh)(nil),
+		(*EdgeToCloud_UserLogout)(nil),
 	}
 	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[5].OneofWrappers = []any{
 		(*SendMedia_Inline)(nil),
 		(*SendMedia_PresignedUrl)(nil),
+	}
+	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[24].OneofWrappers = []any{
+		(*UserAuthResponse_Tokens)(nil),
+		(*UserAuthResponse_Error)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2271,7 +2848,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc), len(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   22,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
