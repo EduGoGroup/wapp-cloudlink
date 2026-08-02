@@ -31,7 +31,7 @@ sobre gRPC bidi-stream con mTLS. Por aquí viajan órdenes de despacho
 
 | Decisión | Detalle |
 |---|---|
-| Lenguaje | Go 1.23 |
+| Lenguaje | Go 1.26.0 (module `github.com/EduGoGroup/wapp-cloudlink`) |
 | Transporte | gRPC bidi-stream sobre HTTP/2 |
 | Seguridad | mTLS (cert por Edge/tenant) + token de plataforma |
 | Contrato | Protobuf (`.proto` en `proto/`) |
@@ -60,15 +60,61 @@ Motivo: el Edge debe importar el cliente generado **cross-repo**, y los paquetes
 con `buf generate` (config en `buf.gen.yaml`, sin managed mode: el `go_package`
 se declara explícito en el `.proto`).
 
-## Cómo correrá (placeholder)
+## Frames del contrato (`wapp.cloudlink.v1`, tag `v0.10.0`)
+
+Fuente de verdad: `proto/wapp/cloudlink/v1/cloudlink.proto`. Dos servicios:
+`Enrollment.EnrollEdge` (unario, TLS de servidor) y `CloudLink.Connect` (bidi-stream,
+mTLS). El stream multiplexa por `session_id` y correlaciona por `command_id`.
+
+**Comandos `CloudToEdge`** (oneof `payload`):
+
+| Frame | Propósito |
+|---|---|
+| `SendText` | Envío de texto (`to`, `text`). |
+| `SendMedia` | Envío de media (`kind` DOCUMENT/IMAGE, `mime`, `filename`) con `inline` **o** `presigned_url`. |
+| `RunFlowStep` | Paso de flujo opaco (`payload` serializado). |
+| `LeaseUpdate` | Lease operativo firmado (renovación/revocación, kill-switch). |
+| `Ping` | Keep-alive (`nonce`). |
+| `ConfigUpdate` | Push genérico de configuración (ADR-0021): `kind`/`version`/`payload`; primer kind `intents`. |
+| `DiagnosticsRequest` | Petición de diagnóstico bajo demanda (`scope`), ADR-0023. |
+
+**Eventos `EdgeToCloud`** (oneof `payload`):
+
+| Frame | Propósito |
+|---|---|
+| `IncomingMessage` | Entrante de negocio; campos sensibles viajan sellados en `enc_payload` (X25519) o en claro sin sobre. |
+| `DeliveryStatus` | Estado de entrega de un saliente. |
+| `Ack` | Acuse de un comando (`acked_command_id`, `ok`, `error`). |
+| `Heartbeat` | Liveness + `lease_counter` + `self_pn`/`self_jid` (anti-self-loop) + `session_state` + `session_health`. Dispara `MarkOnline`. |
+| `Pong` | Respuesta al `Ping`. |
+| `MessageReceipt` | Acuse delivered/read (solo IDs/estado/timestamp; nunca PII). |
+| `DiagnosticsBundle` | Respuesta a `DiagnosticsRequest`: log tail + dump de goroutines + JSON de subsistemas, saneado y truncado en origen. |
+
+**Sub-mensajes y enums clave** (v0.9.0, Plan 031 / ADR-0023):
+
+- `SessionHealth` adjunto al `Heartbeat`: `whatsapp_socket_state`, `degraded_reason`,
+  `last_inbound_event_age_s`, `dek_load_duration_ms`, `intent_circuit`, `outbox_depth`,
+  `binary_version`, `daemon_uptime_s`. **Solo metadatos operativos** — frontera
+  zero-knowledge (ADR-0007): jamás llaves, DEK, credenciales ni contenido.
+- `enum WhatsappSocketState`: `UNSPECIFIED` / `CONNECTED` / `CONNECTING` / `DEGRADED` / `DEAD`.
+- `enum SessionState`: `UNSPECIFIED` / `LOGGED_OUT` (zombie).
+- `ClassifiedIntent` (Plan 029 / ADR-0020): clasificación local del Edge
+  (`intent`, `params`, `confidence`, `config_version`); viaja preferentemente sellada
+  dentro de `SensitivePayload.intent`.
+- `SensitivePayload`: bloque sellado (X25519 `SealFor`) de los campos sensibles del
+  entrante (`text`, `push_name`, `from_pn`, `from_lid`, `intent`).
+
+Todos los cambios de `v0.9.0` son **aditivos** sobre `v0.8.0` (campos/frames nuevos al
+final, sin renumerar); `buf breaking` (regla FILE) contra `main` pasa sin hallazgos.
+
+## Compilar
 
 ```bash
-# Compilar (placeholder — puede ser un binario standalone o importarse como módulo)
-go build -o bin/cloudlink ./cmd/cloudlink
-
-# Generar código protobuf (placeholder)
-# protoc --go_out=. --go-grpc_out=. proto/cloudlink.proto
+go build ./...            # el paquete puede ejecutarse standalone (cmd/cloudlink) o embeberse
 ```
+
+El código protobuf/gRPC generado **se commitea** en `gen/` y se regenera con **buf**
+(`buf generate`, ver «Código generado» arriba). No se usa `protoc` directamente.
 
 ## PKI de desarrollo / mTLS
 
@@ -132,10 +178,13 @@ se toca en T5 y proto3 no garantiza serialización byte-estable.
 > El `edgeID` se deriva hoy del `session_id` observado (placeholder); la
 > identidad real del Edge vendrá del cert mTLS en T6.
 
-## Estado
+## Estado y versionado
 
-**Greenfield.** Solo scaffold inicial. Ver `CLAUDE.md` para contexto
-arquitectónico y `../../docs/piezas/02-cloudlink.md` para la especificación.
+**Implementado y en piloto.** Contrato en vivo entre el Edge y la Plataforma Cloud por
+WhatsApp real. Module `github.com/EduGoGroup/wapp-cloudlink`; el contrato se corta como
+tags **`vX.Y.Z`** de `wapp.cloudlink.v1` con entrada en `CHANGELOG.md` (última:
+**`v0.10.0`**, Plan 033 / ADR-0025). Compatibilidad hacia atrás garantizada por `buf
+breaking`: los cambios son aditivos y no renumeran campos.
 
-> El module path `github.com/wApp/wapp-cloudlink` es un placeholder ajustable
-> al repositorio Git real cuando se publique.
+Ver `CLAUDE.md` para contexto arquitectónico y `../../docs/piezas/02-cloudlink.md` para la
+especificación completa.

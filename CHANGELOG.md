@@ -6,7 +6,9 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
-Cambios aditivos y compatibles hacia atras con `v0.9.0`, destinados a **v0.10.0**
+## [0.10.0] - 2026-07-16
+
+Cambios aditivos y compatibles hacia atras con `v0.9.0`
 (Plan 033, Ola 2 / ADR-0025 — autenticacion del operador del Edge relayada al IAM
 por el stream bidi existente). El tenant es implicito del canal mTLS: NO viaja en
 el mensaje. Modelo request/response correlacionado por `command_id` (patron
