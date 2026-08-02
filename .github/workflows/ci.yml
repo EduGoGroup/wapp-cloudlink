@@ -1,20 +1,17 @@
 name: CI
 
-# CI de PR/push para wapp-cloudlink (módulo Go único, público).
-# Adaptado del patrón de API de EduGo y de wapp-shared/ci.yml (Go 1.26,
-# golangci-lint v2.12.2: v2.4.0 se compila con Go 1.25 y no carga proyectos Go
-# 1.26 en Actions — mismo pin que cloud-platform en el cierre del 027). SIN
-# deploy a GCP ni GitHub Packages (no aplica a wApp).
+# CI de wapp-cloudlink (módulo Go único, público).
+# Régimen local (2026-08-01): la validación continua vive en la Mac de
+# desarrollo (`make ci-local` / `make ci-docker`, Go 1.26.5 + golangci-lint
+# v2.12.2 fijados), no en Actions. Este workflow queda para corridas
+# manuales (release futuro) — no se dispara con push ni pull_request.
 # Como los módulos wApp son PÚBLICOS, NO se necesita GOPRIVATE ni token: el
 # proxy público resuelve las dependencias.
 on:
-  pull_request:
-    branches: [main, dev]
-  push:
-    branches: [main] # red de seguridad
+  workflow_dispatch:
 
 env:
-  GO_VERSION: '1.26'
+  GO_VERSION: '1.26.5'
 
 jobs:
   test:
@@ -63,7 +60,7 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           args: --timeout=5m
