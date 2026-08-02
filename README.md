@@ -60,7 +60,7 @@ Motivo: el Edge debe importar el cliente generado **cross-repo**, y los paquetes
 con `buf generate` (config en `buf.gen.yaml`, sin managed mode: el `go_package`
 se declara explícito en el `.proto`).
 
-## Frames del contrato (`wapp.cloudlink.v1`, tag `v0.9.0`)
+## Frames del contrato (`wapp.cloudlink.v1`, tag `v0.10.0`)
 
 Fuente de verdad: `proto/wapp/cloudlink/v1/cloudlink.proto`. Dos servicios:
 `Enrollment.EnrollEdge` (unario, TLS de servidor) y `CloudLink.Connect` (bidi-stream,
@@ -183,7 +183,7 @@ se toca en T5 y proto3 no garantiza serialización byte-estable.
 **Implementado y en piloto.** Contrato en vivo entre el Edge y la Plataforma Cloud por
 WhatsApp real. Module `github.com/EduGoGroup/wapp-cloudlink`; el contrato se corta como
 tags **`vX.Y.Z`** de `wapp.cloudlink.v1` con entrada en `CHANGELOG.md` (última:
-**`v0.9.0`**, Plan 031 / ADR-0023). Compatibilidad hacia atrás garantizada por `buf
+**`v0.10.0`**, Plan 033 / ADR-0025). Compatibilidad hacia atrás garantizada por `buf
 breaking`: los cambios son aditivos y no renumeran campos.
 
 Ver `CLAUDE.md` para contexto arquitectónico y `../../docs/piezas/02-cloudlink.md` para la

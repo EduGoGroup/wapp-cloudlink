@@ -43,7 +43,7 @@ cifrado ni las llaves Signal; esos materiales se quedan solo en el Edge.
 
 ---
 
-## Estructura del contrato gRPC (`wapp.cloudlink.v1`, tag actual `v0.9.0`)
+## Estructura del contrato gRPC (`wapp.cloudlink.v1`, tag actual `v0.10.0`)
 
 > El `.proto` **existe y está en vivo** (`proto/wapp/cloudlink/v1/cloudlink.proto`); el
 > código generado se commitea en `gen/` (ver README §«Código generado»). Los cambios se
