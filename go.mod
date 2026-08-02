@@ -1,6 +1,6 @@
 module github.com/EduGoGroup/wapp-cloudlink
 
-go 1.26.0
+go 1.26.5
 
 require (
 	google.golang.org/grpc v1.81.1
