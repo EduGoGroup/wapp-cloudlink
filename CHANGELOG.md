@@ -6,6 +6,36 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-02
+
+Parche de seguridad: solo dependencias. El contrato proto `wapp.cloudlink.v1` no
+cambia — ni un campo, ni un número de tag —, así que cualquier consumidor de
+`v0.10.0` sube sin tocar código. El código generado en `gen/` compila con el grpc
+nuevo sin regenerarse.
+
+### Security
+
+- `google.golang.org/grpc` `v1.81.1` → `v1.82.1`: cierra **GO-2026-6061**, que
+  cubre el motor RBAC de xDS y el transporte HTTP/2 del **servidor** gRPC. Pesa
+  más aquí que en un módulo cualquiera: este repo define el contrato de CloudLink,
+  el canal mTLS entre la nube y el Edge, y sus dos consumidores
+  (`wapp-cloud-platform` y `wapp-edge-agent`) tienen la vulnerabilidad
+  **alcanzable desde su propio código** — las trazas de `govulncheck` llegan hasta
+  `bootstrap.serveGRPC` y `Adapter.send`. Este release es el primer eslabón para
+  cerrarla; los consumidores la cierran al subir a esta versión.
+- `golang.org/x/text` `v0.34.0` → `v0.39.0`: incluye **GO-2026-5970**, un bucle
+  infinito ante entrada inválida.
+- `golang.org/x/net` `v0.51.0` → `v0.56.0` y `golang.org/x/sys` `v0.42.0` →
+  `v0.46.0` (esta última arrastrada por `go mod tidy`).
+- `google.golang.org/genproto/googleapis/rpc` actualizado al snapshot que exige el
+  grafo de módulos del grpc nuevo.
+
+### Verificación
+
+- `govulncheck ./...` tras el bump: **No vulnerabilities found**.
+- `make ci-local` en verde con el toolchain fijado (Go 1.26.5 / golangci-lint
+  v2.12.2): `gofmt`, `go vet`, lint sin hallazgos, `go test -race` y `go build`.
+
 ## [0.10.0] - 2026-07-16
 
 Cambios aditivos y compatibles hacia atras con `v0.9.0`
