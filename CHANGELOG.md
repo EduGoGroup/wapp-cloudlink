@@ -6,6 +6,37 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-12
+
+### Removed
+
+Limpieza de huérfanos del contrato (2026-08-12). Los tres campos que se retiran
+**nunca transportaron un byte en producción**: se verificó, uno a uno, que no
+tenían productor —y en dos casos, tampoco consumidor— en ninguno de los repos del
+ecosistema. Los tres quedan `reserved` (número **y** nombre), que es la forma
+correcta de retirar: el hueco no se reutiliza y ningún Edge viejo puede
+interpretar otra cosa ahí. **El wire no cambia**: nadie los serializaba.
+
+- **`CloudToEdge.run_flow_step` (campo 12) y su `message RunFlowStep`.** Sin
+  productor NI consumidor desde que existe el contrato. La nube no lo emitía y el
+  `switch` de `handleCommand` del Edge no lo contemplaba (caía en el `default`).
+  La máquina de estados vive entera en la nube (ADR-0005) y las respuestas salen
+  como `SendText`/`SendMedia`.
+- **`EdgeToCloud.delivery` (campo 11) y su `message DeliveryStatus`.** El
+  simétrico: consumidor sin productor. La nube lo recibía (un `log.Debug` en
+  `connect.go`) pero ningún punto del Edge lo emitió jamás — los acuses reales
+  viajan como `MessageReceipt` (campo 15) desde el Plan 013.
+- **`SendMedia.inline` (campo 10 del `oneof src`).** El Edge nunca lo miró:
+  `handleSendMedia` lee siempre `presigned_url`, así que un `SendMedia` con
+  `inline` producía una descarga de URL vacía y un fallo. El media viaja por URL
+  prefirmada de corta vida (Plan 017).
+
+⚠️ **Para los consumidores**: es *breaking* a nivel de API Go (desaparecen
+`EdgeToCloud_Delivery`, `SendMedia.GetInline()` y `RunFlowStep`), aunque
+compatible a nivel de wire. `wapp-cloud-platform` y `wapp-edge-agent` ya vienen
+ajustados en su rama de la misma limpieza; el orden al publicar es el de siempre:
+**primero este contrato con su release, después los consumidores**.
+
 ## [0.10.1] - 2026-08-02
 
 Parche de seguridad: solo dependencias. El contrato proto `wapp.cloudlink.v1` no

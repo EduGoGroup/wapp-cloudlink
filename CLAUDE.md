@@ -59,11 +59,17 @@ Enrollment.EnrollEdge (unario)
 
 CloudLink.Connect (bidi-stream, mTLS)
   → edge abre una conexión persistente full-duplex
-  Comandos cloud→edge (oneof): SendText, SendMedia, RunFlowStep, LeaseUpdate, Ping,
-                               ConfigUpdate (ADR-0021), DiagnosticsRequest (ADR-0023)
-  Eventos edge→cloud (oneof):  IncomingMessage, DeliveryStatus, Ack, Heartbeat, Pong,
-                               MessageReceipt, DiagnosticsBundle (ADR-0023)
+  Comandos cloud→edge (oneof): SendText, SendMedia, LeaseUpdate, Ping,
+                               ConfigUpdate (ADR-0021), DiagnosticsRequest (ADR-0023),
+                               UserAuthResponse (ADR-0025)
+  Eventos edge→cloud (oneof):  IncomingMessage, Ack, Heartbeat, Pong, MessageReceipt,
+                               DiagnosticsBundle (ADR-0023), UserLogin/UserRefresh/
+                               UserLogout (ADR-0025)
 ```
+
+> **Retirados el 2026-08-12** (reserved, ver CHANGELOG): `RunFlowStep` (12),
+> `DeliveryStatus` (11) y `SendMedia.inline` (10). Los tres estaban declarados y ninguno
+> transportó nunca un byte: sin productor en todo el ecosistema. No los reintroduzcas.
 
 `Heartbeat` adjunta `SessionHealth` (snapshot operativo por sesión, solo metadatos:
 socket, degradación, edad del último entrante, outbox, `binary_version`, uptime) más

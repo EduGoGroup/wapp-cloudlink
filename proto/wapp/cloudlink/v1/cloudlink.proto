@@ -34,10 +34,18 @@ service CloudLink {
 message CloudToEdge {
   string command_id = 1;
   string session_id = 2;
+  // 12 = run_flow_step (RunFlowStep), RETIRADO el 2026-08-12. Nació previsto y
+  // murió sin nacer: NUNCA tuvo productor ni consumidor. La nube no lo emitía y
+  // el switch de handleCommand del Edge no lo contemplaba (caía en el default).
+  // La máquina de estados vive ENTERA en la nube (ADR-0005) y las respuestas
+  // salen como SendText/SendMedia, así que no hay nada que este frame pudiera
+  // transportar. Reservado —no reutilizar el 12 ni el nombre— para que ningún
+  // Edge viejo interprete otra cosa en ese hueco.
+  reserved 12;
+  reserved "run_flow_step";
   oneof payload {
     SendText send_text = 10;
     SendMedia send_media = 11;
-    RunFlowStep run_flow_step = 12;
     LeaseUpdate lease_update = 13;
     Ping ping = 14;
     ConfigUpdate config_update = 15;
@@ -54,9 +62,15 @@ message CloudToEdge {
 message EdgeToCloud {
   string command_id = 1;
   string session_id = 2;
+  // 11 = delivery (DeliveryStatus), RETIRADO el 2026-08-12. Era el simétrico del
+  // 12 de CloudToEdge: frame con CONSUMIDOR y sin PRODUCTOR. La nube lo recibía
+  // (un log.Debug en connect.go y nada más), pero ningún punto del Edge lo emitió
+  // jamás: los acuses reales viajan como MessageReceipt (campo 15) desde el
+  // Plan 013, con su tabla message_receipts y su correlación por MessageID.
+  reserved 11;
+  reserved "delivery";
   oneof payload {
     IncomingMessage incoming = 10;
-    DeliveryStatus delivery = 11;
     Ack ack = 12;
     Heartbeat heartbeat = 13;
     Pong pong = 14;
@@ -83,8 +97,14 @@ message SendMedia {
   string mime = 3;
   string filename = 4; // nombre del archivo (DocumentMessage.FileName/Title)
   MediaKind kind = 5; // elige rama DocumentMessage vs ImageMessage (el mime no basta)
+  // 10 = inline (bytes), RETIRADO el 2026-08-12: el contrato lo declaraba y el
+  // Edge no lo miró nunca — handleSendMedia lee SIEMPRE presigned_url, así que un
+  // SendMedia con inline producía una descarga de URL vacía y un fallo. El media
+  // viaja por URL prefirmada de corta vida (Plan 017): el Edge descarga sin
+  // credenciales y nunca recibe el archivo por el stream.
+  reserved 10;
+  reserved "inline";
   oneof src {
-    bytes inline = 10;
     string presigned_url = 11;
   }
 }
@@ -95,10 +115,6 @@ enum MediaKind {
   MEDIA_KIND_UNSPECIFIED = 0;
   MEDIA_KIND_DOCUMENT = 1; // documento (PDF, etc.)
   MEDIA_KIND_IMAGE = 2; // imagen
-}
-
-message RunFlowStep {
-  bytes payload = 1;
 }
 
 message LeaseUpdate {
@@ -152,11 +168,6 @@ message ClassifiedIntent {
   map<string, string> params = 2; // parámetros extraídos (pueden contener texto literal del cliente)
   float confidence = 3; // confianza [0,1] reportada por el clasificador local
   string config_version = 4; // versión del catálogo de intenciones usado (trazabilidad)
-}
-
-message DeliveryStatus {
-  string wa_message_id = 1;
-  string status = 2;
 }
 
 // Acuse de estado de un saliente (delivered/read). Aditivo (Plan 013): sube por
