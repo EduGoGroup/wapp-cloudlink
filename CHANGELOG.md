@@ -6,6 +6,8 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-12
+
 ### Removed
 
 Limpieza de huérfanos del contrato (2026-08-12). Los tres campos que se retiran
