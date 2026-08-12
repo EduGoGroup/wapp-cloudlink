@@ -133,9 +133,6 @@ func logIncoming(srv *server.Server) {
 		case *cloudlinkv1.EdgeToCloud_Ack:
 			a := p.Ack
 			log.Printf("⬅️  ACK       session=%s acked=%s ok=%v err=%q", sid, a.GetAckedCommandId(), a.GetOk(), a.GetError())
-		case *cloudlinkv1.EdgeToCloud_Delivery:
-			d := p.Delivery
-			log.Printf("⬅️  DELIVERY  session=%s wa_id=%s status=%s", sid, d.GetWaMessageId(), d.GetStatus())
 		case *cloudlinkv1.EdgeToCloud_Heartbeat:
 			log.Printf("⬅️  HEARTBEAT session=%s counter=%d", sid, p.Heartbeat.GetLeaseCounter())
 		case *cloudlinkv1.EdgeToCloud_Pong:
