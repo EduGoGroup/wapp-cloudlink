@@ -21,6 +21,14 @@ message EnrollEdgeResponse {
   bytes ca_chain_pem = 2;
   string tenant_id = 3;
   bytes cloud_enc_pubkey = 4; // pública X25519 (32B) de cifrado de la nube, para que el Edge selle los campos sensibles
+  // lease_pubkey: pública Ed25519 (32B crudos, SIN codificar) de la clave de
+  // firma del lease (kill-switch, ADR-0007). La emite y custodia la nube
+  // (leaseMgr.PublicKey()); el Edge la persiste para poder validar offline la
+  // firma de cada lease que recibe y así detectar un clon con DEK robada pero
+  // sin lease vigente. Campo aditivo (Plan 055 · T4.1, D-055.5) — mismo patrón
+  // que cloud_enc_pubkey (campo 4). La codificación en disco (hex/base64) es
+  // decisión del Edge, no de este contrato: aquí viajan los bytes crudos.
+  bytes lease_pubkey = 5;
 }
 
 // CloudLink: único canal Edge<->cloud. Stream bidireccional persistente con
