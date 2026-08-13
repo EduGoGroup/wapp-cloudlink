@@ -6,6 +6,16 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+### Added
+
+- **`EnrollEdgeResponse.lease_pubkey` (campo 5, `bytes`).** La pública Ed25519
+  (32B crudos) de la clave de firma del lease (kill-switch, ADR-0007), para que
+  el enrolamiento se la entregue al Edge sin copiarla a mano. Mismo patrón que
+  `cloud_enc_pubkey` (campo 4): reusa el mecanismo existente en vez de abrir un
+  RPC nuevo. **Cambio aditivo** — no rompe compatibilidad de wire; un Edge
+  viejo que no conoce el campo 5 simplemente lo ignora, y `buf breaking` contra
+  `main` sigue en verde (Plan 055 · T4.1, D-055.5).
+
 ## [0.11.0] - 2026-08-12
 
 ### Removed
