@@ -286,8 +286,16 @@ type EnrollEdgeResponse struct {
 	CaChainPem     []byte                 `protobuf:"bytes,2,opt,name=ca_chain_pem,json=caChainPem,proto3" json:"ca_chain_pem,omitempty"`
 	TenantId       string                 `protobuf:"bytes,3,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	CloudEncPubkey []byte                 `protobuf:"bytes,4,opt,name=cloud_enc_pubkey,json=cloudEncPubkey,proto3" json:"cloud_enc_pubkey,omitempty"` // pública X25519 (32B) de cifrado de la nube, para que el Edge selle los campos sensibles
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// lease_pubkey: pública Ed25519 (32B crudos, SIN codificar) de la clave de
+	// firma del lease (kill-switch, ADR-0007). La emite y custodia la nube
+	// (leaseMgr.PublicKey()); el Edge la persiste para poder validar offline la
+	// firma de cada lease que recibe y así detectar un clon con DEK robada pero
+	// sin lease vigente. Campo aditivo (Plan 055 · T4.1, D-055.5) — mismo patrón
+	// que cloud_enc_pubkey (campo 4). La codificación en disco (hex/base64) es
+	// decisión del Edge, no de este contrato: aquí viajan los bytes crudos.
+	LeasePubkey   []byte `protobuf:"bytes,5,opt,name=lease_pubkey,json=leasePubkey,proto3" json:"lease_pubkey,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EnrollEdgeResponse) Reset() {
@@ -344,6 +352,13 @@ func (x *EnrollEdgeResponse) GetTenantId() string {
 func (x *EnrollEdgeResponse) GetCloudEncPubkey() []byte {
 	if x != nil {
 		return x.CloudEncPubkey
+	}
+	return nil
+}
+
+func (x *EnrollEdgeResponse) GetLeasePubkey() []byte {
+	if x != nil {
+		return x.LeasePubkey
 	}
 	return nil
 }
@@ -2366,13 +2381,14 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"!wapp/cloudlink/v1/cloudlink.proto\x12\x11wapp.cloudlink.v1\"U\n" +
 	"\x11EnrollEdgeRequest\x12'\n" +
 	"\x0factivation_code\x18\x01 \x01(\tR\x0eactivationCode\x12\x17\n" +
-	"\acsr_pem\x18\x02 \x01(\fR\x06csrPem\"\xa1\x01\n" +
+	"\acsr_pem\x18\x02 \x01(\fR\x06csrPem\"\xc4\x01\n" +
 	"\x12EnrollEdgeResponse\x12\"\n" +
 	"\redge_cert_pem\x18\x01 \x01(\fR\vedgeCertPem\x12 \n" +
 	"\fca_chain_pem\x18\x02 \x01(\fR\n" +
 	"caChainPem\x12\x1b\n" +
 	"\ttenant_id\x18\x03 \x01(\tR\btenantId\x12(\n" +
-	"\x10cloud_enc_pubkey\x18\x04 \x01(\fR\x0ecloudEncPubkey\"\xd1\x04\n" +
+	"\x10cloud_enc_pubkey\x18\x04 \x01(\fR\x0ecloudEncPubkey\x12!\n" +
+	"\flease_pubkey\x18\x05 \x01(\fR\vleasePubkey\"\xd1\x04\n" +
 	"\vCloudToEdge\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
