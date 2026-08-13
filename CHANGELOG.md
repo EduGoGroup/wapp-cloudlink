@@ -6,6 +6,8 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-13
+
 ### Added
 
 - **`EnrollEdgeResponse.lease_pubkey` (campo 5, `bytes`).** La pública Ed25519
