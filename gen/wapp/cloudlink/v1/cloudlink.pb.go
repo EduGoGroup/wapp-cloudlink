@@ -1574,8 +1574,57 @@ type SessionHealth struct {
 	BinaryVersion string `protobuf:"bytes,7,opt,name=binary_version,json=binaryVersion,proto3" json:"binary_version,omitempty"`
 	// Tiempo en segundos que lleva vivo el daemon del Edge (uptime del proceso).
 	DaemonUptimeS int64 `protobuf:"varint,8,opt,name=daemon_uptime_s,json=daemonUptimeS,proto3" json:"daemon_uptime_s,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Veredicto del reparto de CPU entre el proceso del cajero de intents y Ollama
+	// (Plan 051, T2.8): uno de "disjunta" | "solapada" | "cajero_sin_confinar".
+	// Existe porque los dos compiten por los mismos núcleos: si sus afinidades se
+	// solapan, la inferencia y el despacho se estorban y el síntoma que se ve en la
+	// nube es latencia, no una causa. Vacío = ESTE EDGE NO LO SABE (no es Linux, o
+	// el parte del worker está rancio). Mismo patrón que intent_circuit (campo 5):
+	// vacío significa "no lo sé", NUNCA "está bien".
+	WorkerTaskset string `protobuf:"bytes,9,opt,name=worker_taskset,json=workerTaskset,proto3" json:"worker_taskset,omitempty"`
+	// p50 en milisegundos de la INFERENCIA del clasificador local (Plan 029), medido
+	// por el worker sobre sus propias muestras. 0 = no medible en este Edge (el
+	// worker no tiene muestras, o su parte está rancio); 0 NO significa "instantáneo".
+	// ⚠️ NO es el p50 del handler de whatsmeow: esa es otra población (todos los
+	// entrantes, no solo los clasificados) y además otro proceso. Confundirlos es un
+	// error fácil y silencioso — el número parece plausible y la conclusión es falsa.
+	IntentP50Ms int64 `protobuf:"varint,10,opt,name=intent_p50_ms,json=intentP50Ms,proto3" json:"intent_p50_ms,omitempty"`
+	// Despachos que salieron SIN intent publicado, desglosados por motivo (cierra
+	// INV-051.3). La clave es el motivo tal cual lo enumera app.MotivosOmitido() en
+	// el Edge; hoy son ocho: "fastlane", "sin_texto", "no_elegible", "presupuesto",
+	// "breaker", "desconocido", "apagado", "fallo_repetido".
+	//
+	// Es un mapa y no un campo por motivo a propósito: un motivo nuevo en el Edge no
+	// debe exigir un release de este contrato ni un bump en los dos consumidores —y
+	// la lista, al transcribirla a mano, ya se ha quedado corta dos veces.
+	//
+	// ⚠️ Estos contadores NUNCA se suman entre sí. "fastlane" es el camino sano (se
+	// omitió porque no hacía falta clasificar) y "presupuesto"/"breaker" no lo son
+	// (se omitió porque el clasificador no pudo). Agregarlos en un solo total borra
+	// exactamente la información por la que existe el desglose.
+	IntentOmittedByReason map[string]int64 `protobuf:"bytes,11,rep,name=intent_omitted_by_reason,json=intentOmittedByReason,proto3" json:"intent_omitted_by_reason,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// Contadores del despachador nacidos en el barrido de la Ola 3 (Plan 051, T3.12).
+	// Son cuatro campos y no un agregado por diseño:
+	//
+	//   - stuck_heads / stuck_head_polls miden la cabeza de cola atascada. Existen
+	//     porque ANTES de T3.12 ese caso no tenía contador, y sin él la telemetría
+	//     publicaba una sesión MUERTA como si estuviera ociosa: cero despachos se lee
+	//     igual "no hay trabajo" que "el trabajo no avanza". stuck_heads cuenta las
+	//     cabezas detectadas atascadas; stuck_head_polls, las veces que se sondeó una.
+	//   - failed_seal_dispatch y failed_seal_budget están SEPARADOS a propósito: solo
+	//     UNO de los dos implica mensajes duplicados. El fallo al sellar el despacho
+	//     deja el mensaje sin marca de salida y puede reenviarse; el fallo al sellar el
+	//     presupuesto solo descuadra la contabilidad del gasto, sin duplicar nada.
+	//     Volver a agregarlos en un contador único deshace T3.12 y devuelve la
+	//     ambigüedad que costó el barrido entero encontrar.
+	//
+	// Los cuatro son acumulados del proceso; 0 = no ocurrió (o Edge que no los mide).
+	StuckHeads         int64 `protobuf:"varint,12,opt,name=stuck_heads,json=stuckHeads,proto3" json:"stuck_heads,omitempty"`
+	StuckHeadPolls     int64 `protobuf:"varint,13,opt,name=stuck_head_polls,json=stuckHeadPolls,proto3" json:"stuck_head_polls,omitempty"`
+	FailedSealDispatch int64 `protobuf:"varint,14,opt,name=failed_seal_dispatch,json=failedSealDispatch,proto3" json:"failed_seal_dispatch,omitempty"`
+	FailedSealBudget   int64 `protobuf:"varint,15,opt,name=failed_seal_budget,json=failedSealBudget,proto3" json:"failed_seal_budget,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SessionHealth) Reset() {
@@ -1660,6 +1709,55 @@ func (x *SessionHealth) GetBinaryVersion() string {
 func (x *SessionHealth) GetDaemonUptimeS() int64 {
 	if x != nil {
 		return x.DaemonUptimeS
+	}
+	return 0
+}
+
+func (x *SessionHealth) GetWorkerTaskset() string {
+	if x != nil {
+		return x.WorkerTaskset
+	}
+	return ""
+}
+
+func (x *SessionHealth) GetIntentP50Ms() int64 {
+	if x != nil {
+		return x.IntentP50Ms
+	}
+	return 0
+}
+
+func (x *SessionHealth) GetIntentOmittedByReason() map[string]int64 {
+	if x != nil {
+		return x.IntentOmittedByReason
+	}
+	return nil
+}
+
+func (x *SessionHealth) GetStuckHeads() int64 {
+	if x != nil {
+		return x.StuckHeads
+	}
+	return 0
+}
+
+func (x *SessionHealth) GetStuckHeadPolls() int64 {
+	if x != nil {
+		return x.StuckHeadPolls
+	}
+	return 0
+}
+
+func (x *SessionHealth) GetFailedSealDispatch() int64 {
+	if x != nil {
+		return x.FailedSealDispatch
+	}
+	return 0
+}
+
+func (x *SessionHealth) GetFailedSealBudget() int64 {
+	if x != nil {
+		return x.FailedSealBudget
 	}
 	return 0
 }
@@ -2488,7 +2586,7 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\aself_pn\x18\x02 \x01(\tR\x06selfPn\x12\x19\n" +
 	"\bself_jid\x18\x03 \x01(\tR\aselfJid\x125\n" +
 	"\x05state\x18\x04 \x01(\x0e2\x1f.wapp.cloudlink.v1.SessionStateR\x05state\x12G\n" +
-	"\x0esession_health\x18\x05 \x01(\v2 .wapp.cloudlink.v1.SessionHealthR\rsessionHealth\"\x96\x03\n" +
+	"\x0esession_health\x18\x05 \x01(\v2 .wapp.cloudlink.v1.SessionHealthR\rsessionHealth\"\xcc\x06\n" +
 	"\rSessionHealth\x12Z\n" +
 	"\x15whatsapp_socket_state\x18\x01 \x01(\x0e2&.wapp.cloudlink.v1.WhatsappSocketStateR\x13whatsappSocketState\x12'\n" +
 	"\x0fdegraded_reason\x18\x02 \x01(\tR\x0edegradedReason\x126\n" +
@@ -2497,7 +2595,19 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\x0eintent_circuit\x18\x05 \x01(\tR\rintentCircuit\x12!\n" +
 	"\foutbox_depth\x18\x06 \x01(\x03R\voutboxDepth\x12%\n" +
 	"\x0ebinary_version\x18\a \x01(\tR\rbinaryVersion\x12&\n" +
-	"\x0fdaemon_uptime_s\x18\b \x01(\x03R\rdaemonUptimeS\"\x1c\n" +
+	"\x0fdaemon_uptime_s\x18\b \x01(\x03R\rdaemonUptimeS\x12%\n" +
+	"\x0eworker_taskset\x18\t \x01(\tR\rworkerTaskset\x12\"\n" +
+	"\rintent_p50_ms\x18\n" +
+	" \x01(\x03R\vintentP50Ms\x12t\n" +
+	"\x18intent_omitted_by_reason\x18\v \x03(\v2;.wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntryR\x15intentOmittedByReason\x12\x1f\n" +
+	"\vstuck_heads\x18\f \x01(\x03R\n" +
+	"stuckHeads\x12(\n" +
+	"\x10stuck_head_polls\x18\r \x01(\x03R\x0estuckHeadPolls\x120\n" +
+	"\x14failed_seal_dispatch\x18\x0e \x01(\x03R\x12failedSealDispatch\x12,\n" +
+	"\x12failed_seal_budget\x18\x0f \x01(\x03R\x10failedSealBudget\x1aH\n" +
+	"\x1aIntentOmittedByReasonEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"\x1c\n" +
 	"\x04Pong\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\x03R\x05nonce\"\x94\x01\n" +
 	"\fConfigUpdate\x12\x1d\n" +
@@ -2596,7 +2706,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP() []byte {
 }
 
 var file_wapp_cloudlink_v1_cloudlink_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
 	(MediaKind)(0),             // 0: wapp.cloudlink.v1.MediaKind
 	(ReceiptStatus)(0),         // 1: wapp.cloudlink.v1.ReceiptStatus
@@ -2628,6 +2738,7 @@ var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
 	(*UserTokens)(nil),         // 27: wapp.cloudlink.v1.UserTokens
 	(*UserAuthError)(nil),      // 28: wapp.cloudlink.v1.UserAuthError
 	nil,                        // 29: wapp.cloudlink.v1.ClassifiedIntent.ParamsEntry
+	nil,                        // 30: wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
 }
 var file_wapp_cloudlink_v1_cloudlink_proto_depIdxs = []int32{
 	8,  // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
@@ -2654,17 +2765,18 @@ var file_wapp_cloudlink_v1_cloudlink_proto_depIdxs = []int32{
 	3,  // 21: wapp.cloudlink.v1.Heartbeat.state:type_name -> wapp.cloudlink.v1.SessionState
 	18, // 22: wapp.cloudlink.v1.Heartbeat.session_health:type_name -> wapp.cloudlink.v1.SessionHealth
 	2,  // 23: wapp.cloudlink.v1.SessionHealth.whatsapp_socket_state:type_name -> wapp.cloudlink.v1.WhatsappSocketState
-	27, // 24: wapp.cloudlink.v1.UserAuthResponse.tokens:type_name -> wapp.cloudlink.v1.UserTokens
-	28, // 25: wapp.cloudlink.v1.UserAuthResponse.error:type_name -> wapp.cloudlink.v1.UserAuthError
-	4,  // 26: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
-	7,  // 27: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
-	5,  // 28: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
-	6,  // 29: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
-	28, // [28:30] is the sub-list for method output_type
-	26, // [26:28] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	30, // 24: wapp.cloudlink.v1.SessionHealth.intent_omitted_by_reason:type_name -> wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
+	27, // 25: wapp.cloudlink.v1.UserAuthResponse.tokens:type_name -> wapp.cloudlink.v1.UserTokens
+	28, // 26: wapp.cloudlink.v1.UserAuthResponse.error:type_name -> wapp.cloudlink.v1.UserAuthError
+	4,  // 27: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
+	7,  // 28: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
+	5,  // 29: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
+	6,  // 30: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
+	29, // [29:31] is the sub-list for method output_type
+	27, // [27:29] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_wapp_cloudlink_v1_cloudlink_proto_init() }
@@ -2705,7 +2817,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc), len(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   26,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

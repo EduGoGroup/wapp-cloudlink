@@ -6,6 +6,46 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-17
+
+### Added
+
+Siete campos nuevos en **`SessionHealth`** (Plan 051 · T4.2), la telemetría que le
+faltaba al camino de intents para poder operarse sin SSH. Cierran el camino de
+**INV-051.3** (el desglose por motivo nunca agregado) y **REQ-051.17**.
+
+- **`worker_taskset` (campo 9, `string`).** Veredicto del reparto de CPU entre el
+  proceso del cajero y Ollama (T2.8): `"disjunta"` | `"solapada"` |
+  `"cajero_sin_confinar"`. Vacío = este Edge no lo sabe.
+- **`intent_p50_ms` (campo 10, `int64`).** p50 de la inferencia del clasificador
+  local, en ms. `0` = no medible. No es el p50 del handler de whatsmeow.
+- **`intent_omitted_by_reason` (campo 11, `map<string, int64>`).** Despachos sin
+  intent publicado, desglosados por motivo (`fastlane`, `sin_texto`,
+  `no_elegible`, `presupuesto`, `breaker`, `desconocido`, `apagado`,
+  `fallo_repetido`). Mapa y no campos fijos: un motivo nuevo en el Edge no debe
+  exigir un release de este contrato. Los contadores **nunca** se suman entre sí.
+- **`stuck_heads` (campo 12, `int64`)**, **`stuck_head_polls` (campo 13,
+  `int64`)**, **`failed_seal_dispatch` (campo 14, `int64`)** y
+  **`failed_seal_budget` (campo 15, `int64`)**. Contadores del despachador nacidos
+  en el barrido de la Ola 3 (T3.12). El 14 y el 15 van separados a propósito: solo
+  uno de los dos implica mensajes duplicados.
+
+**Cambio aditivo** — no rompe compatibilidad de wire. `SessionHealth` no tenía
+ningún `reserved` y sus campos ocupados eran el 1..8, así que el 9..15 son huecos
+nunca usados: un Edge o un Cloud viejo que no conoce estos campos simplemente los
+ignora al deserializar, y uno nuevo los recibe en su cero (que en todos ellos
+significa "sin dato", nunca "está bien"). Por eso `buf breaking` contra `main`
+sigue en verde: no se renumera, no se renombra y no se cambia el tipo de nada.
+El cambio es aditivo sobre `0.12.0`, así que la versión que lo publique será un
+**minor**.
+
+⚠️ **No se añadió ningún campo `ollama_ok`, y es deliberado — no lo "arregles"
+después.** La sonda de Ollama se retiró a propósito en T3.0 del Plan 051 y hay un
+test en el Edge que impide reintroducirla. La señal honesta de la salud de Ollama
+es el estado del breaker del cajero, que ya tiene su campo desde el Plan 031:
+**`intent_circuit` (campo 5)**. Lo que cambia con el Plan 051 es quién lo llena,
+que es trabajo del Edge, no del contrato.
+
 ## [0.12.0] - 2026-08-13
 
 ### Added

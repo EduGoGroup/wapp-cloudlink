@@ -263,6 +263,55 @@ message SessionHealth {
   string binary_version = 7;
   // Tiempo en segundos que lleva vivo el daemon del Edge (uptime del proceso).
   int64 daemon_uptime_s = 8;
+  // Veredicto del reparto de CPU entre el proceso del cajero de intents y Ollama
+  // (Plan 051, T2.8): uno de "disjunta" | "solapada" | "cajero_sin_confinar".
+  // Existe porque los dos compiten por los mismos núcleos: si sus afinidades se
+  // solapan, la inferencia y el despacho se estorban y el síntoma que se ve en la
+  // nube es latencia, no una causa. Vacío = ESTE EDGE NO LO SABE (no es Linux, o
+  // el parte del worker está rancio). Mismo patrón que intent_circuit (campo 5):
+  // vacío significa "no lo sé", NUNCA "está bien".
+  string worker_taskset = 9;
+  // p50 en milisegundos de la INFERENCIA del clasificador local (Plan 029), medido
+  // por el worker sobre sus propias muestras. 0 = no medible en este Edge (el
+  // worker no tiene muestras, o su parte está rancio); 0 NO significa "instantáneo".
+  // ⚠️ NO es el p50 del handler de whatsmeow: esa es otra población (todos los
+  // entrantes, no solo los clasificados) y además otro proceso. Confundirlos es un
+  // error fácil y silencioso — el número parece plausible y la conclusión es falsa.
+  int64 intent_p50_ms = 10;
+  // Despachos que salieron SIN intent publicado, desglosados por motivo (cierra
+  // INV-051.3). La clave es el motivo tal cual lo enumera app.MotivosOmitido() en
+  // el Edge; hoy son ocho: "fastlane", "sin_texto", "no_elegible", "presupuesto",
+  // "breaker", "desconocido", "apagado", "fallo_repetido".
+  //
+  // Es un mapa y no un campo por motivo a propósito: un motivo nuevo en el Edge no
+  // debe exigir un release de este contrato ni un bump en los dos consumidores —y
+  // la lista, al transcribirla a mano, ya se ha quedado corta dos veces.
+  //
+  // ⚠️ Estos contadores NUNCA se suman entre sí. "fastlane" es el camino sano (se
+  // omitió porque no hacía falta clasificar) y "presupuesto"/"breaker" no lo son
+  // (se omitió porque el clasificador no pudo). Agregarlos en un solo total borra
+  // exactamente la información por la que existe el desglose.
+  map<string, int64> intent_omitted_by_reason = 11;
+  // Contadores del despachador nacidos en el barrido de la Ola 3 (Plan 051, T3.12).
+  // Son cuatro campos y no un agregado por diseño:
+  //
+  //  - stuck_heads / stuck_head_polls miden la cabeza de cola atascada. Existen
+  //    porque ANTES de T3.12 ese caso no tenía contador, y sin él la telemetría
+  //    publicaba una sesión MUERTA como si estuviera ociosa: cero despachos se lee
+  //    igual "no hay trabajo" que "el trabajo no avanza". stuck_heads cuenta las
+  //    cabezas detectadas atascadas; stuck_head_polls, las veces que se sondeó una.
+  //  - failed_seal_dispatch y failed_seal_budget están SEPARADOS a propósito: solo
+  //    UNO de los dos implica mensajes duplicados. El fallo al sellar el despacho
+  //    deja el mensaje sin marca de salida y puede reenviarse; el fallo al sellar el
+  //    presupuesto solo descuadra la contabilidad del gasto, sin duplicar nada.
+  //    Volver a agregarlos en un contador único deshace T3.12 y devuelve la
+  //    ambigüedad que costó el barrido entero encontrar.
+  //
+  // Los cuatro son acumulados del proceso; 0 = no ocurrió (o Edge que no los mide).
+  int64 stuck_heads = 12;
+  int64 stuck_head_polls = 13;
+  int64 failed_seal_dispatch = 14;
+  int64 failed_seal_budget = 15;
 }
 
 // WhatsappSocketState: estado del socket de WhatsApp reportado por el Edge con
