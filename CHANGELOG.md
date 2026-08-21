@@ -6,6 +6,29 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-21
+
+### Added
+
+**`transport.ControlSessionID`** — el `session_id` de control del stream, que hasta hoy
+era un literal privado del Edge (MP-11).
+
+- **Qué es.** El id fijo que el Edge estampa en los frames de autenticación
+  (`UserLogin`, `UserRefresh`, `UserLogout`) cuando todavía no hay ninguna sesión de
+  WhatsApp que pueda prestar el suyo: el gateway enruta la respuesta por
+  `registry.Push(session_id)` y exige uno no vacío, pero el operador puede loguearse en
+  el **primer arranque**, antes de emparejar ningún teléfono.
+- **Por qué sube al contrato.** No es el Edge quien lo necesitaba compartido, sino la
+  **nube** — y no para enrutarlo (eso ya lo hacía) sino para lo contrario: para **NO
+  persistirlo** como sesión de flota. Sin eso nace una fila en `fleet_sessions` que no
+  corresponde a ningún teléfono y que el cliente ve en su dashboard como si lo fuera.
+- **Por qué aquí y no duplicado.** Su divergencia **no daría un error de compilación**:
+  reaparecería la fila fantasma, en silencio. Es el criterio que este paquete ya aplicaba
+  a los límites de transporte — lo que los dos extremos tienen que saber igual.
+
+⚠️ **No toca el proto.** Es una constante Go del paquete `transport`; el contrato
+`wapp.cloudlink.v1` queda intacto y la compatibilidad es total en ambos sentidos.
+
 ## [0.13.0] - 2026-08-17
 
 ### Added
