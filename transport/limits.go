@@ -1,8 +1,11 @@
-// Package transport centraliza los límites y opciones de transporte gRPC del
+// Package transport centraliza los límites, opciones y CONSTANTES DE PROTOCOLO del
 // canal CloudLink para que el servidor (nube) y el cliente (Edge) compartan UNA
 // única fuente de verdad (T7/H4). No es internal a propósito: el Edge (repo
 // aparte) importa DialOptions para dialar con los mismos límites que impone el
-// servidor.
+// servidor, y ControlSessionID para estampar el mismo id que la nube reconoce.
+//
+// El criterio de qué entra aquí: lo que los DOS extremos tienen que saber igual, y
+// cuya divergencia no daría un error de compilación sino un fallo de campo.
 package transport
 
 import "google.golang.org/grpc"
