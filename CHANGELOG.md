@@ -6,6 +6,8 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-24
+
 ### Added
 
 **El par de frames de inferencia** (Plan 044 · Ola 1.6, ADR-0045, REQ-34): el Edge pasa
