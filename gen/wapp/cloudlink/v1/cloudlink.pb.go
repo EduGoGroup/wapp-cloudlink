@@ -1643,8 +1643,61 @@ type SessionHealth struct {
 	StuckHeadPolls     int64 `protobuf:"varint,13,opt,name=stuck_head_polls,json=stuckHeadPolls,proto3" json:"stuck_head_polls,omitempty"`
 	FailedSealDispatch int64 `protobuf:"varint,14,opt,name=failed_seal_dispatch,json=failedSealDispatch,proto3" json:"failed_seal_dispatch,omitempty"`
 	FailedSealBudget   int64 `protobuf:"varint,15,opt,name=failed_seal_budget,json=failedSealBudget,proto3" json:"failed_seal_budget,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// ── Telemetría de inferencia (Plan 044 · Ola 1.7, T1.7-5) ──────────────────
+	//
+	// Sube por AQUÍ y no por un /metrics del Edge porque el Edge NO PUBLICA
+	// MÉTRICAS: no tiene dependencia de Prometheus, ni registry, ni endpoint. El
+	// Cloud sí, y ya lo raspa un cron. Colgarlo del heartbeat evita además tener
+	// que raspar N máquinas de clientes —cada una detrás de su propia red— y
+	// encaja con el reparto del ADR-0045: el Cloud orquesta y observa, el Edge
+	// sirve y reporta.
+	//
+	// Las dos FASES van separadas (16 y 17) porque juntas no se pueden
+	// reconciliar: este repo llegó a tener dos p50 de inferencia que se
+	// contradecían —~20 s en diseño contra 8,1 s en campo— y no eran un error de
+	// medición, medían poblaciones con distinto CALOR DE PREFIJO. Con un solo
+	// número esa diferencia es invisible y la discusión no se puede cerrar.
+	//
+	// ⚠️ Cuantiles y contadores tienen VENTANAS DISTINTAS, y confundirlas da
+	// resultados absurdos: los dos InferenceLatency son de una ventana móvil del
+	// EMISOR (una foto), mientras que los dos mapas son ACUMULADOS DEL PROCESO y
+	// monótonos — la ventana de esos la hace el consumidor con rate(). No dividas
+	// un cuantil entre un contador.
+	// AUSENTE = NO MEDIBLE (este Edge no mide la fase, o no hubo muestras en la
+	// ventana); presente ⇒ hubo muestras y `samples` lo dice. Van como sub-mensaje
+	// justo para ganar esa presencia: distinguir "no lo sé" de "medí y salió cero"
+	// sin gastar el valor 0 en ello. Es DELIBERADAMENTE distinto del vecino
+	// intent_p50_ms (campo 10), que sí usa el 0 como "no medible" y tiene que
+	// advertirlo por escrito para que nadie lo lea como "instantáneo": esa
+	// ambigüedad es la que aquí no se hereda. Un consumidor que hoy convierte cero
+	// en nil al publicar puede, con estos, mirar la presencia directamente.
+	InferencePrefill    *InferenceLatency `protobuf:"bytes,16,opt,name=inference_prefill,json=inferencePrefill,proto3" json:"inference_prefill,omitempty"`
+	InferenceGeneration *InferenceLatency `protobuf:"bytes,17,opt,name=inference_generation,json=inferenceGeneration,proto3" json:"inference_generation,omitempty"`
+	// Inferencias repartidas por RÉGIMEN DE CALOR del prefijo, la señal que explica
+	// los dos p50 irreconciliables de arriba: responde "¿qué proporción de las
+	// inferencias de la última hora pagó arranque en frío?".
+	//
+	// Las claves las enumera el Edge; hoy "frio" y "caliente". 🔴 Los UMBRALES que
+	// separan una de otra NO VIAJAN AQUÍ y no deben deducirse de este campo: son
+	// política del emisor y se mueven con el hardware del cliente. Este contrato
+	// transporta el reparto YA HECHO, no el criterio con que se hizo.
+	//
+	// Mapa y no un contador por régimen, por la misma razón que
+	// intent_omitted_by_reason (campo 11): una categoría nueva —una franja
+	// intermedia entre los dos extremos, por ejemplo— no debe exigir un release de
+	// este contrato ni un bump en los dos consumidores.
+	InferenceByRegime map[string]int64 `protobuf:"bytes,18,rep,name=inference_by_regime,json=inferenceByRegime,proto3" json:"inference_by_regime,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// Inferencias repartidas por el `class` que declaró el InferenceRequest (campo
+	// 8 de ese mensaje). Misma regla que allí: ausente o desconocido cuenta como
+	// "interactivo".
+	//
+	// 🔴 Y misma prohibición, que aquí conviene repetir porque un reparto invita a
+	// usarlo: esto DESCRIBE, no decide. No sirve para elegir a quién servir, no
+	// entra en el aforo y no mueve el umbral del breaker (ADR-0042). Si algún día
+	// una decisión empieza a leer este campo, el error está en el lector.
+	InferenceByClass map[string]int64 `protobuf:"bytes,19,rep,name=inference_by_class,json=inferenceByClass,proto3" json:"inference_by_class,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *SessionHealth) Reset() {
@@ -1782,6 +1835,98 @@ func (x *SessionHealth) GetFailedSealBudget() int64 {
 	return 0
 }
 
+func (x *SessionHealth) GetInferencePrefill() *InferenceLatency {
+	if x != nil {
+		return x.InferencePrefill
+	}
+	return nil
+}
+
+func (x *SessionHealth) GetInferenceGeneration() *InferenceLatency {
+	if x != nil {
+		return x.InferenceGeneration
+	}
+	return nil
+}
+
+func (x *SessionHealth) GetInferenceByRegime() map[string]int64 {
+	if x != nil {
+		return x.InferenceByRegime
+	}
+	return nil
+}
+
+func (x *SessionHealth) GetInferenceByClass() map[string]int64 {
+	if x != nil {
+		return x.InferenceByClass
+	}
+	return nil
+}
+
+// InferenceLatency: un cuantil de latencia JUNTO AL TAMAÑO DE SU MUESTRA
+// (Plan 044 · Ola 1.7). Los dos campos van atados en un mensaje, y no sueltos en
+// SessionHealth, para que sea IMPOSIBLE publicar o leer el cuantil sin tener
+// delante su n.
+//
+// No es celo: un cuantil sobre una muestra pequeña es un MÁXIMO DISFRAZADO, y
+// comparar cuantiles de n distinto ya fabricó aquí una conclusión falsa. Mismo
+// criterio que el oneof de InferenceResult — que la regla la imponga el wire y
+// no una convención que alguien puede olvidar.
+type InferenceLatency struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// p50 de la fase, en milisegundos, sobre la ventana móvil del emisor.
+	P50Ms int64 `protobuf:"varint,1,opt,name=p50_ms,json=p50Ms,proto3" json:"p50_ms,omitempty"`
+	// Número de muestras del que sale ese p50, EN ESA MISMA VENTANA (no es un
+	// acumulado del proceso). Siempre > 0 cuando este mensaje viaja.
+	Samples       int64 `protobuf:"varint,2,opt,name=samples,proto3" json:"samples,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InferenceLatency) Reset() {
+	*x = InferenceLatency{}
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InferenceLatency) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InferenceLatency) ProtoMessage() {}
+
+func (x *InferenceLatency) ProtoReflect() protoreflect.Message {
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InferenceLatency.ProtoReflect.Descriptor instead.
+func (*InferenceLatency) Descriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *InferenceLatency) GetP50Ms() int64 {
+	if x != nil {
+		return x.P50Ms
+	}
+	return 0
+}
+
+func (x *InferenceLatency) GetSamples() int64 {
+	if x != nil {
+		return x.Samples
+	}
+	return 0
+}
+
 type Pong struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Nonce         int64                  `protobuf:"varint,1,opt,name=nonce,proto3" json:"nonce,omitempty"`
@@ -1791,7 +1936,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[14]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1803,7 +1948,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[14]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1816,7 +1961,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{14}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Pong) GetNonce() int64 {
@@ -1844,7 +1989,7 @@ type ConfigUpdate struct {
 
 func (x *ConfigUpdate) Reset() {
 	*x = ConfigUpdate{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[15]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1856,7 +2001,7 @@ func (x *ConfigUpdate) String() string {
 func (*ConfigUpdate) ProtoMessage() {}
 
 func (x *ConfigUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[15]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1869,7 +2014,7 @@ func (x *ConfigUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigUpdate.ProtoReflect.Descriptor instead.
 func (*ConfigUpdate) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{15}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ConfigUpdate) GetCommandId() string {
@@ -1925,7 +2070,7 @@ type DiagnosticsRequest struct {
 
 func (x *DiagnosticsRequest) Reset() {
 	*x = DiagnosticsRequest{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[16]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1937,7 +2082,7 @@ func (x *DiagnosticsRequest) String() string {
 func (*DiagnosticsRequest) ProtoMessage() {}
 
 func (x *DiagnosticsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[16]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1950,7 +2095,7 @@ func (x *DiagnosticsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiagnosticsRequest.ProtoReflect.Descriptor instead.
 func (*DiagnosticsRequest) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{16}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DiagnosticsRequest) GetCommandId() string {
@@ -1996,7 +2141,7 @@ type DiagnosticsBundle struct {
 
 func (x *DiagnosticsBundle) Reset() {
 	*x = DiagnosticsBundle{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[17]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2008,7 +2153,7 @@ func (x *DiagnosticsBundle) String() string {
 func (*DiagnosticsBundle) ProtoMessage() {}
 
 func (x *DiagnosticsBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[17]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2021,7 +2166,7 @@ func (x *DiagnosticsBundle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiagnosticsBundle.ProtoReflect.Descriptor instead.
 func (*DiagnosticsBundle) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{17}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DiagnosticsBundle) GetCommandId() string {
@@ -2174,7 +2319,7 @@ type InferenceRequest struct {
 
 func (x *InferenceRequest) Reset() {
 	*x = InferenceRequest{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[18]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2186,7 +2331,7 @@ func (x *InferenceRequest) String() string {
 func (*InferenceRequest) ProtoMessage() {}
 
 func (x *InferenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[18]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2199,7 +2344,7 @@ func (x *InferenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InferenceRequest.ProtoReflect.Descriptor instead.
 func (*InferenceRequest) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{18}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *InferenceRequest) GetCommandId() string {
@@ -2288,7 +2433,7 @@ type InferenceResult struct {
 
 func (x *InferenceResult) Reset() {
 	*x = InferenceResult{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[19]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2300,7 +2445,7 @@ func (x *InferenceResult) String() string {
 func (*InferenceResult) ProtoMessage() {}
 
 func (x *InferenceResult) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[19]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2313,7 +2458,7 @@ func (x *InferenceResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InferenceResult.ProtoReflect.Descriptor instead.
 func (*InferenceResult) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{19}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *InferenceResult) GetCommandId() string {
@@ -2395,7 +2540,7 @@ type InferenceOutput struct {
 
 func (x *InferenceOutput) Reset() {
 	*x = InferenceOutput{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[20]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2407,7 +2552,7 @@ func (x *InferenceOutput) String() string {
 func (*InferenceOutput) ProtoMessage() {}
 
 func (x *InferenceOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[20]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2420,7 +2565,7 @@ func (x *InferenceOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InferenceOutput.ProtoReflect.Descriptor instead.
 func (*InferenceOutput) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{20}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *InferenceOutput) GetRawJson() string {
@@ -2447,7 +2592,7 @@ type UserLoginRequest struct {
 
 func (x *UserLoginRequest) Reset() {
 	*x = UserLoginRequest{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[21]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2459,7 +2604,7 @@ func (x *UserLoginRequest) String() string {
 func (*UserLoginRequest) ProtoMessage() {}
 
 func (x *UserLoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[21]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2472,7 +2617,7 @@ func (x *UserLoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserLoginRequest.ProtoReflect.Descriptor instead.
 func (*UserLoginRequest) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{21}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UserLoginRequest) GetCommandId() string {
@@ -2517,7 +2662,7 @@ type UserRefreshRequest struct {
 
 func (x *UserRefreshRequest) Reset() {
 	*x = UserRefreshRequest{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[22]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2529,7 +2674,7 @@ func (x *UserRefreshRequest) String() string {
 func (*UserRefreshRequest) ProtoMessage() {}
 
 func (x *UserRefreshRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[22]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2542,7 +2687,7 @@ func (x *UserRefreshRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRefreshRequest.ProtoReflect.Descriptor instead.
 func (*UserRefreshRequest) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{22}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *UserRefreshRequest) GetCommandId() string {
@@ -2583,7 +2728,7 @@ type UserLogoutRequest struct {
 
 func (x *UserLogoutRequest) Reset() {
 	*x = UserLogoutRequest{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[23]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2595,7 +2740,7 @@ func (x *UserLogoutRequest) String() string {
 func (*UserLogoutRequest) ProtoMessage() {}
 
 func (x *UserLogoutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[23]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2608,7 +2753,7 @@ func (x *UserLogoutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserLogoutRequest.ProtoReflect.Descriptor instead.
 func (*UserLogoutRequest) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{23}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *UserLogoutRequest) GetCommandId() string {
@@ -2659,7 +2804,7 @@ type UserAuthResponse struct {
 
 func (x *UserAuthResponse) Reset() {
 	*x = UserAuthResponse{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[24]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2671,7 +2816,7 @@ func (x *UserAuthResponse) String() string {
 func (*UserAuthResponse) ProtoMessage() {}
 
 func (x *UserAuthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[24]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2684,7 +2829,7 @@ func (x *UserAuthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserAuthResponse.ProtoReflect.Descriptor instead.
 func (*UserAuthResponse) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{24}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *UserAuthResponse) GetCommandId() string {
@@ -2758,7 +2903,7 @@ type UserTokens struct {
 
 func (x *UserTokens) Reset() {
 	*x = UserTokens{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[25]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2770,7 +2915,7 @@ func (x *UserTokens) String() string {
 func (*UserTokens) ProtoMessage() {}
 
 func (x *UserTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[25]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2783,7 +2928,7 @@ func (x *UserTokens) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTokens.ProtoReflect.Descriptor instead.
 func (*UserTokens) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{25}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *UserTokens) GetAccessToken() string {
@@ -2828,7 +2973,7 @@ type UserAuthError struct {
 
 func (x *UserAuthError) Reset() {
 	*x = UserAuthError{}
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[26]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2840,7 +2985,7 @@ func (x *UserAuthError) String() string {
 func (*UserAuthError) ProtoMessage() {}
 
 func (x *UserAuthError) ProtoReflect() protoreflect.Message {
-	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[26]
+	mi := &file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2853,7 +2998,7 @@ func (x *UserAuthError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserAuthError.ProtoReflect.Descriptor instead.
 func (*UserAuthError) Descriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{26}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *UserAuthError) GetCode() string {
@@ -2974,7 +3119,8 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\aself_pn\x18\x02 \x01(\tR\x06selfPn\x12\x19\n" +
 	"\bself_jid\x18\x03 \x01(\tR\aselfJid\x125\n" +
 	"\x05state\x18\x04 \x01(\x0e2\x1f.wapp.cloudlink.v1.SessionStateR\x05state\x12G\n" +
-	"\x0esession_health\x18\x05 \x01(\v2 .wapp.cloudlink.v1.SessionHealthR\rsessionHealth\"\xcc\x06\n" +
+	"\x0esession_health\x18\x05 \x01(\v2 .wapp.cloudlink.v1.SessionHealthR\rsessionHealth\"\xd0\n" +
+	"\n" +
 	"\rSessionHealth\x12Z\n" +
 	"\x15whatsapp_socket_state\x18\x01 \x01(\x0e2&.wapp.cloudlink.v1.WhatsappSocketStateR\x13whatsappSocketState\x12'\n" +
 	"\x0fdegraded_reason\x18\x02 \x01(\tR\x0edegradedReason\x126\n" +
@@ -2992,10 +3138,23 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"stuckHeads\x12(\n" +
 	"\x10stuck_head_polls\x18\r \x01(\x03R\x0estuckHeadPolls\x120\n" +
 	"\x14failed_seal_dispatch\x18\x0e \x01(\x03R\x12failedSealDispatch\x12,\n" +
-	"\x12failed_seal_budget\x18\x0f \x01(\x03R\x10failedSealBudget\x1aH\n" +
+	"\x12failed_seal_budget\x18\x0f \x01(\x03R\x10failedSealBudget\x12P\n" +
+	"\x11inference_prefill\x18\x10 \x01(\v2#.wapp.cloudlink.v1.InferenceLatencyR\x10inferencePrefill\x12V\n" +
+	"\x14inference_generation\x18\x11 \x01(\v2#.wapp.cloudlink.v1.InferenceLatencyR\x13inferenceGeneration\x12g\n" +
+	"\x13inference_by_regime\x18\x12 \x03(\v27.wapp.cloudlink.v1.SessionHealth.InferenceByRegimeEntryR\x11inferenceByRegime\x12d\n" +
+	"\x12inference_by_class\x18\x13 \x03(\v26.wapp.cloudlink.v1.SessionHealth.InferenceByClassEntryR\x10inferenceByClass\x1aH\n" +
 	"\x1aIntentOmittedByReasonEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"\x1c\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\x1aD\n" +
+	"\x16InferenceByRegimeEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\x1aC\n" +
+	"\x15InferenceByClassEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"C\n" +
+	"\x10InferenceLatency\x12\x15\n" +
+	"\x06p50_ms\x18\x01 \x01(\x03R\x05p50Ms\x12\x18\n" +
+	"\asamples\x18\x02 \x01(\x03R\asamples\"\x1c\n" +
 	"\x04Pong\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\x03R\x05nonce\"\x94\x01\n" +
 	"\fConfigUpdate\x12\x1d\n" +
@@ -3126,7 +3285,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP() []byte {
 }
 
 var file_wapp_cloudlink_v1_cloudlink_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
 	(MediaKind)(0),             // 0: wapp.cloudlink.v1.MediaKind
 	(ReceiptStatus)(0),         // 1: wapp.cloudlink.v1.ReceiptStatus
@@ -3147,58 +3306,65 @@ var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
 	(*Ack)(nil),                // 16: wapp.cloudlink.v1.Ack
 	(*Heartbeat)(nil),          // 17: wapp.cloudlink.v1.Heartbeat
 	(*SessionHealth)(nil),      // 18: wapp.cloudlink.v1.SessionHealth
-	(*Pong)(nil),               // 19: wapp.cloudlink.v1.Pong
-	(*ConfigUpdate)(nil),       // 20: wapp.cloudlink.v1.ConfigUpdate
-	(*DiagnosticsRequest)(nil), // 21: wapp.cloudlink.v1.DiagnosticsRequest
-	(*DiagnosticsBundle)(nil),  // 22: wapp.cloudlink.v1.DiagnosticsBundle
-	(*InferenceRequest)(nil),   // 23: wapp.cloudlink.v1.InferenceRequest
-	(*InferenceResult)(nil),    // 24: wapp.cloudlink.v1.InferenceResult
-	(*InferenceOutput)(nil),    // 25: wapp.cloudlink.v1.InferenceOutput
-	(*UserLoginRequest)(nil),   // 26: wapp.cloudlink.v1.UserLoginRequest
-	(*UserRefreshRequest)(nil), // 27: wapp.cloudlink.v1.UserRefreshRequest
-	(*UserLogoutRequest)(nil),  // 28: wapp.cloudlink.v1.UserLogoutRequest
-	(*UserAuthResponse)(nil),   // 29: wapp.cloudlink.v1.UserAuthResponse
-	(*UserTokens)(nil),         // 30: wapp.cloudlink.v1.UserTokens
-	(*UserAuthError)(nil),      // 31: wapp.cloudlink.v1.UserAuthError
-	nil,                        // 32: wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
+	(*InferenceLatency)(nil),   // 19: wapp.cloudlink.v1.InferenceLatency
+	(*Pong)(nil),               // 20: wapp.cloudlink.v1.Pong
+	(*ConfigUpdate)(nil),       // 21: wapp.cloudlink.v1.ConfigUpdate
+	(*DiagnosticsRequest)(nil), // 22: wapp.cloudlink.v1.DiagnosticsRequest
+	(*DiagnosticsBundle)(nil),  // 23: wapp.cloudlink.v1.DiagnosticsBundle
+	(*InferenceRequest)(nil),   // 24: wapp.cloudlink.v1.InferenceRequest
+	(*InferenceResult)(nil),    // 25: wapp.cloudlink.v1.InferenceResult
+	(*InferenceOutput)(nil),    // 26: wapp.cloudlink.v1.InferenceOutput
+	(*UserLoginRequest)(nil),   // 27: wapp.cloudlink.v1.UserLoginRequest
+	(*UserRefreshRequest)(nil), // 28: wapp.cloudlink.v1.UserRefreshRequest
+	(*UserLogoutRequest)(nil),  // 29: wapp.cloudlink.v1.UserLogoutRequest
+	(*UserAuthResponse)(nil),   // 30: wapp.cloudlink.v1.UserAuthResponse
+	(*UserTokens)(nil),         // 31: wapp.cloudlink.v1.UserTokens
+	(*UserAuthError)(nil),      // 32: wapp.cloudlink.v1.UserAuthError
+	nil,                        // 33: wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
+	nil,                        // 34: wapp.cloudlink.v1.SessionHealth.InferenceByRegimeEntry
+	nil,                        // 35: wapp.cloudlink.v1.SessionHealth.InferenceByClassEntry
 }
 var file_wapp_cloudlink_v1_cloudlink_proto_depIdxs = []int32{
 	9,  // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
 	10, // 1: wapp.cloudlink.v1.CloudToEdge.send_media:type_name -> wapp.cloudlink.v1.SendMedia
 	11, // 2: wapp.cloudlink.v1.CloudToEdge.lease_update:type_name -> wapp.cloudlink.v1.LeaseUpdate
 	12, // 3: wapp.cloudlink.v1.CloudToEdge.ping:type_name -> wapp.cloudlink.v1.Ping
-	20, // 4: wapp.cloudlink.v1.CloudToEdge.config_update:type_name -> wapp.cloudlink.v1.ConfigUpdate
-	21, // 5: wapp.cloudlink.v1.CloudToEdge.diagnostics_request:type_name -> wapp.cloudlink.v1.DiagnosticsRequest
-	29, // 6: wapp.cloudlink.v1.CloudToEdge.user_auth_response:type_name -> wapp.cloudlink.v1.UserAuthResponse
-	23, // 7: wapp.cloudlink.v1.CloudToEdge.inference_request:type_name -> wapp.cloudlink.v1.InferenceRequest
+	21, // 4: wapp.cloudlink.v1.CloudToEdge.config_update:type_name -> wapp.cloudlink.v1.ConfigUpdate
+	22, // 5: wapp.cloudlink.v1.CloudToEdge.diagnostics_request:type_name -> wapp.cloudlink.v1.DiagnosticsRequest
+	30, // 6: wapp.cloudlink.v1.CloudToEdge.user_auth_response:type_name -> wapp.cloudlink.v1.UserAuthResponse
+	24, // 7: wapp.cloudlink.v1.CloudToEdge.inference_request:type_name -> wapp.cloudlink.v1.InferenceRequest
 	13, // 8: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
 	16, // 9: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
 	17, // 10: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
-	19, // 11: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
+	20, // 11: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
 	15, // 12: wapp.cloudlink.v1.EdgeToCloud.receipt:type_name -> wapp.cloudlink.v1.MessageReceipt
-	22, // 13: wapp.cloudlink.v1.EdgeToCloud.diagnostics_bundle:type_name -> wapp.cloudlink.v1.DiagnosticsBundle
-	26, // 14: wapp.cloudlink.v1.EdgeToCloud.user_login:type_name -> wapp.cloudlink.v1.UserLoginRequest
-	27, // 15: wapp.cloudlink.v1.EdgeToCloud.user_refresh:type_name -> wapp.cloudlink.v1.UserRefreshRequest
-	28, // 16: wapp.cloudlink.v1.EdgeToCloud.user_logout:type_name -> wapp.cloudlink.v1.UserLogoutRequest
-	24, // 17: wapp.cloudlink.v1.EdgeToCloud.inference_result:type_name -> wapp.cloudlink.v1.InferenceResult
+	23, // 13: wapp.cloudlink.v1.EdgeToCloud.diagnostics_bundle:type_name -> wapp.cloudlink.v1.DiagnosticsBundle
+	27, // 14: wapp.cloudlink.v1.EdgeToCloud.user_login:type_name -> wapp.cloudlink.v1.UserLoginRequest
+	28, // 15: wapp.cloudlink.v1.EdgeToCloud.user_refresh:type_name -> wapp.cloudlink.v1.UserRefreshRequest
+	29, // 16: wapp.cloudlink.v1.EdgeToCloud.user_logout:type_name -> wapp.cloudlink.v1.UserLogoutRequest
+	25, // 17: wapp.cloudlink.v1.EdgeToCloud.inference_result:type_name -> wapp.cloudlink.v1.InferenceResult
 	0,  // 18: wapp.cloudlink.v1.SendMedia.kind:type_name -> wapp.cloudlink.v1.MediaKind
 	1,  // 19: wapp.cloudlink.v1.MessageReceipt.status:type_name -> wapp.cloudlink.v1.ReceiptStatus
 	3,  // 20: wapp.cloudlink.v1.Heartbeat.state:type_name -> wapp.cloudlink.v1.SessionState
 	18, // 21: wapp.cloudlink.v1.Heartbeat.session_health:type_name -> wapp.cloudlink.v1.SessionHealth
 	2,  // 22: wapp.cloudlink.v1.SessionHealth.whatsapp_socket_state:type_name -> wapp.cloudlink.v1.WhatsappSocketState
-	32, // 23: wapp.cloudlink.v1.SessionHealth.intent_omitted_by_reason:type_name -> wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
-	4,  // 24: wapp.cloudlink.v1.InferenceResult.error:type_name -> wapp.cloudlink.v1.InferenceError
-	30, // 25: wapp.cloudlink.v1.UserAuthResponse.tokens:type_name -> wapp.cloudlink.v1.UserTokens
-	31, // 26: wapp.cloudlink.v1.UserAuthResponse.error:type_name -> wapp.cloudlink.v1.UserAuthError
-	5,  // 27: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
-	8,  // 28: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
-	6,  // 29: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
-	7,  // 30: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
-	29, // [29:31] is the sub-list for method output_type
-	27, // [27:29] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	33, // 23: wapp.cloudlink.v1.SessionHealth.intent_omitted_by_reason:type_name -> wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
+	19, // 24: wapp.cloudlink.v1.SessionHealth.inference_prefill:type_name -> wapp.cloudlink.v1.InferenceLatency
+	19, // 25: wapp.cloudlink.v1.SessionHealth.inference_generation:type_name -> wapp.cloudlink.v1.InferenceLatency
+	34, // 26: wapp.cloudlink.v1.SessionHealth.inference_by_regime:type_name -> wapp.cloudlink.v1.SessionHealth.InferenceByRegimeEntry
+	35, // 27: wapp.cloudlink.v1.SessionHealth.inference_by_class:type_name -> wapp.cloudlink.v1.SessionHealth.InferenceByClassEntry
+	4,  // 28: wapp.cloudlink.v1.InferenceResult.error:type_name -> wapp.cloudlink.v1.InferenceError
+	31, // 29: wapp.cloudlink.v1.UserAuthResponse.tokens:type_name -> wapp.cloudlink.v1.UserTokens
+	32, // 30: wapp.cloudlink.v1.UserAuthResponse.error:type_name -> wapp.cloudlink.v1.UserAuthError
+	5,  // 31: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
+	8,  // 32: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
+	6,  // 33: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
+	7,  // 34: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
+	33, // [33:35] is the sub-list for method output_type
+	31, // [31:33] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_wapp_cloudlink_v1_cloudlink_proto_init() }
@@ -3231,12 +3397,12 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[5].OneofWrappers = []any{
 		(*SendMedia_PresignedUrl)(nil),
 	}
-	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[18].OneofWrappers = []any{}
-	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[19].OneofWrappers = []any{
+	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[19].OneofWrappers = []any{}
+	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[20].OneofWrappers = []any{
 		(*InferenceResult_EncOutput)(nil),
 		(*InferenceResult_Error)(nil),
 	}
-	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[24].OneofWrappers = []any{
+	file_wapp_cloudlink_v1_cloudlink_proto_msgTypes[25].OneofWrappers = []any{
 		(*UserAuthResponse_Tokens)(nil),
 		(*UserAuthResponse_Error)(nil),
 	}
@@ -3246,7 +3412,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc), len(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   28,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

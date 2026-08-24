@@ -320,6 +320,76 @@ message SessionHealth {
   int64 stuck_head_polls = 13;
   int64 failed_seal_dispatch = 14;
   int64 failed_seal_budget = 15;
+  // ── Telemetría de inferencia (Plan 044 · Ola 1.7, T1.7-5) ──────────────────
+  //
+  // Sube por AQUÍ y no por un /metrics del Edge porque el Edge NO PUBLICA
+  // MÉTRICAS: no tiene dependencia de Prometheus, ni registry, ni endpoint. El
+  // Cloud sí, y ya lo raspa un cron. Colgarlo del heartbeat evita además tener
+  // que raspar N máquinas de clientes —cada una detrás de su propia red— y
+  // encaja con el reparto del ADR-0045: el Cloud orquesta y observa, el Edge
+  // sirve y reporta.
+  //
+  // Las dos FASES van separadas (16 y 17) porque juntas no se pueden
+  // reconciliar: este repo llegó a tener dos p50 de inferencia que se
+  // contradecían —~20 s en diseño contra 8,1 s en campo— y no eran un error de
+  // medición, medían poblaciones con distinto CALOR DE PREFIJO. Con un solo
+  // número esa diferencia es invisible y la discusión no se puede cerrar.
+  //
+  // ⚠️ Cuantiles y contadores tienen VENTANAS DISTINTAS, y confundirlas da
+  // resultados absurdos: los dos InferenceLatency son de una ventana móvil del
+  // EMISOR (una foto), mientras que los dos mapas son ACUMULADOS DEL PROCESO y
+  // monótonos — la ventana de esos la hace el consumidor con rate(). No dividas
+  // un cuantil entre un contador.
+  // AUSENTE = NO MEDIBLE (este Edge no mide la fase, o no hubo muestras en la
+  // ventana); presente ⇒ hubo muestras y `samples` lo dice. Van como sub-mensaje
+  // justo para ganar esa presencia: distinguir "no lo sé" de "medí y salió cero"
+  // sin gastar el valor 0 en ello. Es DELIBERADAMENTE distinto del vecino
+  // intent_p50_ms (campo 10), que sí usa el 0 como "no medible" y tiene que
+  // advertirlo por escrito para que nadie lo lea como "instantáneo": esa
+  // ambigüedad es la que aquí no se hereda. Un consumidor que hoy convierte cero
+  // en nil al publicar puede, con estos, mirar la presencia directamente.
+  InferenceLatency inference_prefill = 16;
+  InferenceLatency inference_generation = 17;
+  // Inferencias repartidas por RÉGIMEN DE CALOR del prefijo, la señal que explica
+  // los dos p50 irreconciliables de arriba: responde "¿qué proporción de las
+  // inferencias de la última hora pagó arranque en frío?".
+  //
+  // Las claves las enumera el Edge; hoy "frio" y "caliente". 🔴 Los UMBRALES que
+  // separan una de otra NO VIAJAN AQUÍ y no deben deducirse de este campo: son
+  // política del emisor y se mueven con el hardware del cliente. Este contrato
+  // transporta el reparto YA HECHO, no el criterio con que se hizo.
+  //
+  // Mapa y no un contador por régimen, por la misma razón que
+  // intent_omitted_by_reason (campo 11): una categoría nueva —una franja
+  // intermedia entre los dos extremos, por ejemplo— no debe exigir un release de
+  // este contrato ni un bump en los dos consumidores.
+  map<string, int64> inference_by_regime = 18;
+  // Inferencias repartidas por el `class` que declaró el InferenceRequest (campo
+  // 8 de ese mensaje). Misma regla que allí: ausente o desconocido cuenta como
+  // "interactivo".
+  //
+  // 🔴 Y misma prohibición, que aquí conviene repetir porque un reparto invita a
+  // usarlo: esto DESCRIBE, no decide. No sirve para elegir a quién servir, no
+  // entra en el aforo y no mueve el umbral del breaker (ADR-0042). Si algún día
+  // una decisión empieza a leer este campo, el error está en el lector.
+  map<string, int64> inference_by_class = 19;
+}
+
+// InferenceLatency: un cuantil de latencia JUNTO AL TAMAÑO DE SU MUESTRA
+// (Plan 044 · Ola 1.7). Los dos campos van atados en un mensaje, y no sueltos en
+// SessionHealth, para que sea IMPOSIBLE publicar o leer el cuantil sin tener
+// delante su n.
+//
+// No es celo: un cuantil sobre una muestra pequeña es un MÁXIMO DISFRAZADO, y
+// comparar cuantiles de n distinto ya fabricó aquí una conclusión falsa. Mismo
+// criterio que el oneof de InferenceResult — que la regla la imponga el wire y
+// no una convención que alguien puede olvidar.
+message InferenceLatency {
+  // p50 de la fase, en milisegundos, sobre la ventana móvil del emisor.
+  int64 p50_ms = 1;
+  // Número de muestras del que sale ese p50, EN ESA MISMA VENTANA (no es un
+  // acumulado del proceso). Siempre > 0 cuando este mensaje viaja.
+  int64 samples = 2;
 }
 
 // WhatsappSocketState: estado del socket de WhatsApp reportado por el Edge con

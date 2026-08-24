@@ -94,10 +94,20 @@ mTLS). El stream multiplexa por `session_id` y correlaciona por `command_id`.
 
 **Sub-mensajes y enums clave** (v0.9.0, Plan 031 / ADR-0023):
 
-- `SessionHealth` adjunto al `Heartbeat`: `whatsapp_socket_state`, `degraded_reason`,
-  `last_inbound_event_age_s`, `dek_load_duration_ms`, `intent_circuit`, `outbox_depth`,
-  `binary_version`, `daemon_uptime_s`. **Solo metadatos operativos** — frontera
-  zero-knowledge (ADR-0007): jamás llaves, DEK, credenciales ni contenido.
+- `SessionHealth` adjunto al `Heartbeat`. **Solo metadatos operativos** — frontera
+  zero-knowledge (ADR-0007): jamás llaves, DEK, credenciales ni contenido. Tres bloques:
+  - Salud de la sesión (1-8): `whatsapp_socket_state`, `degraded_reason`,
+    `last_inbound_event_age_s`, `dek_load_duration_ms`, `intent_circuit`, `outbox_depth`,
+    `binary_version`, `daemon_uptime_s`.
+  - Worker-cajero (9-15, Plan 051): `worker_taskset`, `intent_p50_ms`,
+    `intent_omitted_by_reason`, `stuck_heads`, `stuck_head_polls`,
+    `failed_seal_dispatch`, `failed_seal_budget`.
+  - Inferencia (16-19, Plan 044 · Ola 1.7): `inference_prefill` e `inference_generation`
+    (ambos `InferenceLatency`; **ausente = no medible**, no cero), más
+    `inference_by_regime` e `inference_by_class` (`map<string,int64>`). Sube por el
+    heartbeat porque **el Edge no publica métricas** y el Cloud sí.
+- `InferenceLatency`: un `p50_ms` **atado a su `samples`** — el cuantil no se puede leer
+  sin su n, porque un cuantil sobre muestra pequeña es un máximo disfrazado.
 - `enum WhatsappSocketState`: `UNSPECIFIED` / `CONNECTED` / `CONNECTING` / `DEGRADED` / `DEAD`.
 - `enum SessionState`: `UNSPECIFIED` / `LOGGED_OUT` (zombie).
 - `SensitivePayload`: bloque sellado (X25519 `SealFor`) de los campos sensibles del
