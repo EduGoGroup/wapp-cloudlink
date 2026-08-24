@@ -2282,6 +2282,11 @@ type InferenceRequest struct {
 	// umbral POR PETICIÓN, derivado del `timeout_ms` de cada una, y vive en el Edge
 	// (ADR-0042: el breaker aprende de la lentitud, no solo de la caída). Este campo
 	// solo dice de qué color pintar la serie.
+	//
+	// Si lo que buscas es que el breaker IGNORE una petición, el campo es `warmup`
+	// (10), no éste. No los fundas en uno: el día que `class` gobierne una decisión,
+	// la prohibición de arriba deja de sostenerse y volvemos a los dos umbrales
+	// fijos.
 	Class string `protobuf:"bytes,8,opt,name=class,proto3" json:"class,omitempty"`
 	// PREVISTO Y HOY VACÍO — el prompt sellado hacia el Edge. Ningún emisor lo
 	// puebla y ningún receptor debe exigirlo ni tratar su ausencia como fallo.
@@ -2310,9 +2315,45 @@ type InferenceRequest struct {
 	//	está previsto en ninguna ola a día de hoy: el campo existe para que el día
 	//	que se decida no haya que renumerar nada, no porque esté en camino.
 	//
-	// El número va en el rango alto a propósito, para dejar juntos en el rango bajo
-	// los campos de uso diario.
-	EncPrompt     []byte `protobuf:"bytes,9,opt,name=enc_prompt,json=encPrompt,proto3" json:"enc_prompt,omitempty"`
+	// El número se eligió en su día "en el rango alto", para dejar juntos abajo los
+	// campos de uso diario. Ese rango bajo se agotó (1-8), así que el uso diario
+	// continúa a partir del 10 y este 9 ya no separa nada: la intención se cumplió
+	// mientras hubo hueco, y hoy es solo el número que le tocó.
+	EncPrompt []byte `protobuf:"bytes,9,opt,name=enc_prompt,json=encPrompt,proto3" json:"enc_prompt,omitempty"`
+	// Marca esta inferencia como de CALENTAMIENTO: el Cloud la emite para dejar
+	// caliente la caché de prefijo del Edge (al conectar, y tras publicar un
+	// ConfigUpdate que cambia el prefijo del tenant), no para responder a nadie. Su
+	// salida SE DESCARTA — nadie la está esperando.
+	//
+	// Qué obliga al Edge: EXCLUIRLA DEL BREAKER, y excluirla ANTES de evaluar — ni
+	// como fallo ni como lentitud. Un calentamiento paga prefill FRÍO POR DISEÑO
+	// (~50 s para un P1 en UAT): eso es exactamente lo que veníamos a hacer, así que
+	// un breaker que lo mire abre el circuito por haber trabajado bien.
+	//
+	// ⚠️ EXCLUIDA DEL BREAKER NO ES GRATIS, y quien lo lea al revés diseñará mal:
+	// un calentamiento SÍ OCUPA LA PLAZA ÚNICA mientras corre y SÍ PASA POR EL
+	// AFORO, como cualquier otra inferencia. Lo único que no hace es contar para la
+	// salud del proveedor. Corolario que conviene tener presente: una ráfaga de
+	// ConfigUpdate es una ráfaga de prefills fríos ocupando la plaza — molesto,
+	// legítimo y NO una avería.
+	//
+	// Por qué es un campo propio y no una `class` reservada ni un prefijo en el
+	// command_id (las dos alternativas que se barajaron):
+	//   - `class` (8) tiene escrito que NO decide nada. Si el breaker lo leyera para
+	//     excluir, `class` decidiría, y la prohibición de aquel campo se cae entera.
+	//   - El command_id es un identificador de CORRELACIÓN. Meterle semántica lo
+	//     convierte en canal de señalización: quien cambie el generador de ids rompe
+	//     el breaker SIN TOCAR el breaker, y ningún test lo ve venir.
+	//
+	// Un booleano explícito hace el contrato legible y el fallo, ruidoso.
+	//
+	// `bool` a secas y NO `optional`, al revés que temperature (5) y
+	// max_output_tokens (7): allí el cero es un valor que alguien PIDE y hay que
+	// distinguirlo de "no dije nada". Aquí no hay nada que distinguir — ausente y
+	// false significan LO MISMO a propósito: inferencia normal, el comportamiento de
+	// hoy. Añadir presencia sería superficie sin consumidor, e invitaría a leer un
+	// "false explícito" como si dijera algo distinto de callarse.
+	Warmup        bool `protobuf:"varint,10,opt,name=warmup,proto3" json:"warmup,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2408,6 +2449,13 @@ func (x *InferenceRequest) GetEncPrompt() []byte {
 		return x.EncPrompt
 	}
 	return nil
+}
+
+func (x *InferenceRequest) GetWarmup() bool {
+	if x != nil {
+		return x.Warmup
+	}
+	return false
 }
 
 // InferenceResult: respuesta del Edge a un InferenceRequest (Plan 044 · Ola 1.6,
@@ -3176,7 +3224,7 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x19\n" +
 	"\blog_tail\x18\x02 \x01(\tR\alogTail\x12%\n" +
 	"\x0egoroutine_dump\x18\x03 \x01(\tR\rgoroutineDump\x12'\n" +
-	"\x0fsubsystems_json\x18\x04 \x01(\tR\x0esubsystemsJson\"\xd2\x02\n" +
+	"\x0fsubsystems_json\x18\x04 \x01(\tR\x0esubsystemsJson\"\xea\x02\n" +
 	"\x10InferenceRequest\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
@@ -3190,7 +3238,9 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\x11max_output_tokens\x18\a \x01(\x05H\x01R\x0fmaxOutputTokens\x88\x01\x01\x12\x14\n" +
 	"\x05class\x18\b \x01(\tR\x05class\x12\x1d\n" +
 	"\n" +
-	"enc_prompt\x18\t \x01(\fR\tencPromptB\x0e\n" +
+	"enc_prompt\x18\t \x01(\fR\tencPrompt\x12\x16\n" +
+	"\x06warmup\x18\n" +
+	" \x01(\bR\x06warmupB\x0e\n" +
 	"\f_temperatureB\x14\n" +
 	"\x12_max_output_tokens\"\x96\x01\n" +
 	"\x0fInferenceResult\x12\x1d\n" +

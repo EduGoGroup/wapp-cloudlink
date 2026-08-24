@@ -40,6 +40,32 @@ para acotar el coste de cada inferencia, y una etiqueta para poder mirarlas por 
   9,9 s — justo el fallo que existe para detectar. El mecanismo real es el umbral **por
   petición**, derivado del `timeout_ms` de cada una, y vive en el Edge (ADR-0042).
 
+**`InferenceRequest.warmup` (campo 10, `bool`)** (Plan 044 · T1.7-4): marca una
+inferencia de **calentamiento** — la que el Cloud emite para dejar caliente la caché de
+prefijo del Edge (al conectar, y tras un `ConfigUpdate` que cambia el prefijo del
+tenant), no para responder a nadie. **Su salida se descarta.**
+
+- **Obliga al Edge a excluirla del breaker**, y a excluirla **antes** de evaluar: ni
+  fallo ni lentitud. Un calentamiento paga prefill **frío por diseño** (~50 s para un P1
+  en UAT), que es justo lo que veníamos a hacer; un breaker que lo mire **abre el
+  circuito por haber trabajado bien**.
+- ⚠️ **Excluida del breaker NO es gratis**, y está escrito en el `.proto` porque quien lo
+  lea al revés diseñará mal: **sí ocupa la plaza única** mientras corre y **sí pasa por
+  el aforo**. Lo único que no hace es contar para la salud del proveedor. Corolario: una
+  ráfaga de `ConfigUpdate` es una ráfaga de prefills fríos ocupando la plaza — molesto,
+  legítimo, y **no una avería**.
+- **Por qué un campo propio** y no una `class` reservada ni un prefijo en el
+  `command_id`, las dos alternativas que se barajaron: `class` (8) tiene escrito que **no
+  decide nada**, y si el breaker lo leyera para excluir esa prohibición se cae entera; y
+  el `command_id` es un identificador de **correlación**, así que meterle semántica lo
+  convierte en canal de señalización — quien cambie el generador de ids **rompe el
+  breaker sin tocar el breaker**, y ningún test lo ve venir. El campo 8 gana un puntero
+  cruzado al 10 para que nadie los funda «simplificando».
+- **`bool` a secas y no `optional`**, al revés que `temperature` y `max_output_tokens`:
+  allí el cero es un valor que alguien **pide** y hay que distinguirlo de «no dije nada».
+  Aquí ausente y `false` significan **lo mismo a propósito** (inferencia normal, el
+  comportamiento de hoy), así que la presencia sería superficie sin consumidor.
+
 **Telemetría de inferencia en `SessionHealth`** (Plan 044 · T1.7-5): cuatro campos nuevos
 (**16-19**) y un sub-mensaje `InferenceLatency`.
 
@@ -80,13 +106,14 @@ respeta el reparto del ADR-0045 (el Cloud orquesta y observa; el Edge sirve y re
 
 ### Compatibilidad
 
-- **Cambio puramente aditivo.** Los dos campos ocupan los números **7 y 8**, que estaban
-  libres en `InferenceRequest` (el 6 era `timeout_ms` y el 9 es `enc_prompt`, previsto y
-  vacío desde la 0.15.0): no se renumera ni se retira nada. `buf breaking` (regla FILE)
-  contra `main` pasa **sin un solo hallazgo**.
+- **Cambio puramente aditivo.** En `InferenceRequest` los campos ocupan los números
+  **7, 8 y 10**, que estaban libres (el 6 era `timeout_ms` y el 9 es `enc_prompt`,
+  previsto y vacío desde la 0.15.0): no se renumera ni se retira nada. `buf breaking`
+  (regla FILE) contra `main` pasa **sin un solo hallazgo**.
 - Un Edge de `v0.15.0` parsea un `InferenceRequest` con estos campos sin error (los
   retiene como unknown fields) y se comporta exactamente como hoy: sin
-  `max_output_tokens` aplica su default y sin `class` no había etiqueta que poner.
+  `max_output_tokens` aplica su default, sin `class` no había etiqueta que poner y sin
+  `warmup` toda inferencia cuenta para el breaker — que es el comportamiento actual.
 - En `SessionHealth` los cuatro campos van del **16 al 19**, sobre 15 campos existentes y
   **sin `reserved`** en el mensaje: no se renumera ni se toca ninguno de los 1-15.
   `buf breaking` (regla FILE) contra `main` pasa **sin un solo hallazgo** — comprobado
