@@ -6,6 +6,122 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-24
+
+### Added
+
+**Dos campos en `InferenceRequest`** (Plan 044 · Ola 1.7): el Cloud gana una perilla
+para acotar el coste de cada inferencia, y una etiqueta para poder mirarlas por separado.
+
+- **`InferenceRequest.max_output_tokens` (campo 7, `optional int32`).** Presupuesto de
+  **salida** de esa inferencia, en tokens. Lo fija el Cloud **por tarea** (P1 ≈ 64,
+  P2/P3 ≈ 512, P4/P5 según su esquema) porque es quien conoce el esquema de la respuesta
+  que espera; el Edge lo aplica como `num_predict` en las opciones del proveedor.
+  **Ausente ⇒ default del Edge** (hoy 256), que es fail-closed hacia el lado barato: si
+  el Cloud calla, se genera poco, no mucho. Es `optional` por la **misma razón que
+  `temperature`** — sin presencia explícita, «quiero 0» y «no dije nada» serían el mismo
+  byte en el cable.
+
+  ⚠️ **Acota, no cura.** Pone un techo a lo que una inferencia puede ocupar la plaza; no
+  promete que la ocupe menos. Medido: una P3 de 293 tokens a 6-12 tok/s siguen siendo
+  **25-50 s** de generación, y ese tiempo no baja por escribir un número aquí. Sirve para
+  que un lote no se pase de lo previsto, no para hacer rápida una petición que es lenta
+  por su tamaño.
+
+- **`InferenceRequest.class` (campo 8, `string`).** Naturaleza declarada de la petición:
+  `"interactivo"` o `"lote"`. **Es SOLO telemetría** — log, heartbeat y etiqueta de
+  serie. Vacío o valor desconocido ⇒ se etiqueta `"interactivo"`, y eso es todo lo que
+  ocurre; nunca es un error.
+
+  🔴 **Prohibido decidir con él**, y la prohibición está escrita en el `.proto`: no elige
+  a quién servir, no entra en el aforo y **no mueve el umbral del breaker**. El porqué es
+  de diseño y no de estilo: con `class` el breaker tendría **dos umbrales fijos en vez de
+  uno**, y seguiría contando como **sana** una petición con `timeout_ms = 10 s` que tardó
+  9,9 s — justo el fallo que existe para detectar. El mecanismo real es el umbral **por
+  petición**, derivado del `timeout_ms` de cada una, y vive en el Edge (ADR-0042).
+
+**`InferenceRequest.warmup` (campo 10, `bool`)** (Plan 044 · T1.7-4): marca una
+inferencia de **calentamiento** — la que el Cloud emite para dejar caliente la caché de
+prefijo del Edge (al conectar, y tras un `ConfigUpdate` que cambia el prefijo del
+tenant), no para responder a nadie. **Su salida se descarta.**
+
+- **Obliga al Edge a excluirla del breaker**, y a excluirla **antes** de evaluar: ni
+  fallo ni lentitud. Un calentamiento paga prefill **frío por diseño** (~50 s para un P1
+  en UAT), que es justo lo que veníamos a hacer; un breaker que lo mire **abre el
+  circuito por haber trabajado bien**.
+- ⚠️ **Excluida del breaker NO es gratis**, y está escrito en el `.proto` porque quien lo
+  lea al revés diseñará mal: **sí ocupa la plaza única** mientras corre y **sí pasa por
+  el aforo**. Lo único que no hace es contar para la salud del proveedor. Corolario: una
+  ráfaga de `ConfigUpdate` es una ráfaga de prefills fríos ocupando la plaza — molesto,
+  legítimo, y **no una avería**.
+- **Por qué un campo propio** y no una `class` reservada ni un prefijo en el
+  `command_id`, las dos alternativas que se barajaron: `class` (8) tiene escrito que **no
+  decide nada**, y si el breaker lo leyera para excluir esa prohibición se cae entera; y
+  el `command_id` es un identificador de **correlación**, así que meterle semántica lo
+  convierte en canal de señalización — quien cambie el generador de ids **rompe el
+  breaker sin tocar el breaker**, y ningún test lo ve venir. El campo 8 gana un puntero
+  cruzado al 10 para que nadie los funda «simplificando».
+- **`bool` a secas y no `optional`**, al revés que `temperature` y `max_output_tokens`:
+  allí el cero es un valor que alguien **pide** y hay que distinguirlo de «no dije nada».
+  Aquí ausente y `false` significan **lo mismo a propósito** (inferencia normal, el
+  comportamiento de hoy), así que la presencia sería superficie sin consumidor.
+
+**Telemetría de inferencia en `SessionHealth`** (Plan 044 · T1.7-5): cuatro campos nuevos
+(**16-19**) y un sub-mensaje `InferenceLatency`.
+
+Sube por el heartbeat y no por un `/metrics` del Edge porque **el Edge no publica
+métricas**: no tiene dependencia de Prometheus, ni registry, ni endpoint. El Cloud sí, y
+ya lo raspa un cron. Además evita raspar N máquinas de clientes, cada una tras su red, y
+respeta el reparto del ADR-0045 (el Cloud orquesta y observa; el Edge sirve y reporta).
+
+- **`inference_prefill` (16) e `inference_generation` (17), ambos `InferenceLatency`.**
+  Las dos fases van **separadas** porque juntas no se pueden reconciliar: este repo llegó
+  a tener dos p50 que se contradecían —**~20 s en diseño contra 8,1 s en campo**— y no
+  era un error de medición, medían poblaciones con distinto **calor de prefijo**. Con un
+  solo número esa diferencia es invisible.
+- **`InferenceLatency { p50_ms = 1; samples = 2; }`.** El cuantil viaja **atado al tamaño
+  de su muestra**, en un mensaje y no como dos campos sueltos, para que sea **imposible
+  leer el p50 sin tener delante su n**. Un cuantil sobre n pequeño es un **máximo
+  disfrazado**, y comparar cuantiles de n distinto ya fabricó aquí una conclusión falsa;
+  mismo criterio que el `oneof` de `InferenceResult` — que la regla la imponga el wire y
+  no una convención que alguien puede olvidar.
+- **Presencia como semántica**: el sub-mensaje **ausente = NO MEDIBLE**; presente ⇒ hubo
+  muestras. Es deliberadamente **distinto de `intent_p50_ms` (campo 10)**, que gasta el
+  valor `0` en «no medible» y tiene que advertirlo por escrito para que nadie lo lea como
+  «instantáneo». Un consumidor que hoy convierte cero en nil al publicar puede, con
+  estos, mirar la presencia directamente.
+- **`inference_by_regime` (18), `map<string,int64>`.** Reparto por régimen de calor del
+  prefijo (hoy `"frio"` / `"caliente"`) — responde «¿qué proporción de la última hora
+  pagó arranque en frío?». 🔴 **Los umbrales NO viajan**: son política del emisor y se
+  mueven con el hardware del cliente; el contrato transporta el reparto **ya hecho**.
+  Mapa y no un contador por régimen por la misma razón que `intent_omitted_by_reason`:
+  una categoría nueva no debe exigir release del contrato ni bump en dos consumidores.
+- **`inference_by_class` (19), `map<string,int64>`.** Reparto por el `class` del
+  `InferenceRequest`; ausente o desconocido cuenta como `"interactivo"`. 🔴 Con la misma
+  prohibición repetida en el `.proto`: **describe, no decide**.
+- ⚠️ **Cuantiles y contadores tienen ventanas distintas** y está escrito en el `.proto`:
+  los dos `InferenceLatency` son de una **ventana móvil del emisor**; los dos mapas son
+  **acumulados del proceso** y monótonos (su ventana la hace el consumidor con `rate()`).
+  No se divide un cuantil entre un contador.
+
+### Compatibilidad
+
+- **Cambio puramente aditivo.** En `InferenceRequest` los campos ocupan los números
+  **7, 8 y 10**, que estaban libres (el 6 era `timeout_ms` y el 9 es `enc_prompt`,
+  previsto y vacío desde la 0.15.0): no se renumera ni se retira nada. `buf breaking`
+  (regla FILE) contra `main` pasa **sin un solo hallazgo**.
+- Un Edge de `v0.15.0` parsea un `InferenceRequest` con estos campos sin error (los
+  retiene como unknown fields) y se comporta exactamente como hoy: sin
+  `max_output_tokens` aplica su default, sin `class` no había etiqueta que poner y sin
+  `warmup` toda inferencia cuenta para el breaker — que es el comportamiento actual.
+- En `SessionHealth` los cuatro campos van del **16 al 19**, sobre 15 campos existentes y
+  **sin `reserved`** en el mensaje: no se renumera ni se toca ninguno de los 1-15.
+  `buf breaking` (regla FILE) contra `main` pasa **sin un solo hallazgo** — comprobado
+  también con un control contra `v0.14.0`, donde sí salen los 4 hallazgos conocidos del
+  intent retirado, para descartar que el verde sea un comando que no mira.
+- Un Cloud de `v0.15.0` ignora la telemetría nueva y sigue leyendo el heartbeat igual; un
+  Edge que aún no la emita se ve, correctamente, como **«no medible»** y no como cero.
+
 ## [0.15.0] - 2026-08-24
 
 ### Added
