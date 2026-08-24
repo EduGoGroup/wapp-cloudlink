@@ -2107,6 +2107,37 @@ type InferenceRequest struct {
 	// turno acotado del Nivel B — ADR-0044). Agotado ⇒ el Edge responde
 	// INFERENCE_ERROR_TIMEOUT; colgarse no es una opción. 0 = default del Edge.
 	TimeoutMs int64 `protobuf:"varint,6,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	// Presupuesto de SALIDA de esta inferencia, en tokens. Lo fija el Cloud —y lo
+	// fija POR TAREA, no por Edge— porque es quien conoce el esquema de la respuesta
+	// que espera: una etiqueta de intención (P1) cabe en ~64 tokens, un desglose
+	// estructurado (P2/P3) necesita ~512, y P4/P5 lo que pida su propio esquema. El
+	// Edge lo traduce a `num_predict` en las opciones del proveedor y no lo discute.
+	//
+	// `optional` por la MISMA razón que `temperature` (campo 5): sin presencia
+	// explícita, "quiero 0" y "no dije nada" serían el MISMO byte en el cable.
+	// Ausente ⇒ el Edge aplica su default (hoy 256), que es fail-closed hacia el
+	// lado barato: si el Cloud calla, se genera poco, no mucho.
+	//
+	// ⚠️ ACOTA, NO CURA — y conviene no confundirlo. Este campo impide que una
+	// inferencia ocupe la plaza MÁS de lo previsto; no promete que la ocupe menos.
+	// Medido: una P3 de 293 tokens a 6-12 tok/s son 25-50 s de generación, y ese
+	// tiempo no baja por escribir un número aquí. Sirve para acotar el peor caso de
+	// un lote, no para hacer rápida una petición que es lenta por su tamaño.
+	MaxOutputTokens *int32 `protobuf:"varint,7,opt,name=max_output_tokens,json=maxOutputTokens,proto3,oneof" json:"max_output_tokens,omitempty"`
+	// Naturaleza declarada de la petición: "interactivo" (alguien espera al otro
+	// lado de WhatsApp) o "lote" (trabajo de fondo). Es SOLO TELEMETRÍA: línea de
+	// log, heartbeat y etiqueta de serie. Vacío o valor desconocido ⇒ se etiqueta
+	// "interactivo", y eso es todo lo que ocurre — nunca un error.
+	//
+	// 🔴 PROHIBIDO DECIDIR CON ESTE CAMPO. No elige a quién servir, no entra en el
+	// aforo y NO mueve el umbral del breaker. La prohibición es de diseño, no de
+	// estilo: con `class` el breaker tendría dos umbrales FIJOS en vez de uno, y
+	// seguiría contando como SANA una petición con `timeout_ms = 10 s` que tardó
+	// 9,9 s — justo el fallo que existe para detectar. El mecanismo real es el
+	// umbral POR PETICIÓN, derivado del `timeout_ms` de cada una, y vive en el Edge
+	// (ADR-0042: el breaker aprende de la lentitud, no solo de la caída). Este campo
+	// solo dice de qué color pintar la serie.
+	Class string `protobuf:"bytes,8,opt,name=class,proto3" json:"class,omitempty"`
 	// PREVISTO Y HOY VACÍO — el prompt sellado hacia el Edge. Ningún emisor lo
 	// puebla y ningún receptor debe exigirlo ni tratar su ausencia como fallo.
 	//
@@ -2211,6 +2242,20 @@ func (x *InferenceRequest) GetTimeoutMs() int64 {
 		return x.TimeoutMs
 	}
 	return 0
+}
+
+func (x *InferenceRequest) GetMaxOutputTokens() int32 {
+	if x != nil && x.MaxOutputTokens != nil {
+		return *x.MaxOutputTokens
+	}
+	return 0
+}
+
+func (x *InferenceRequest) GetClass() string {
+	if x != nil {
+		return x.Class
+	}
+	return ""
 }
 
 func (x *InferenceRequest) GetEncPrompt() []byte {
@@ -2972,7 +3017,7 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x19\n" +
 	"\blog_tail\x18\x02 \x01(\tR\alogTail\x12%\n" +
 	"\x0egoroutine_dump\x18\x03 \x01(\tR\rgoroutineDump\x12'\n" +
-	"\x0fsubsystems_json\x18\x04 \x01(\tR\x0esubsystemsJson\"\xf5\x01\n" +
+	"\x0fsubsystems_json\x18\x04 \x01(\tR\x0esubsystemsJson\"\xd2\x02\n" +
 	"\x10InferenceRequest\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1d\n" +
@@ -2982,10 +3027,13 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\x06format\x18\x04 \x01(\tR\x06format\x12%\n" +
 	"\vtemperature\x18\x05 \x01(\x02H\x00R\vtemperature\x88\x01\x01\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x06 \x01(\x03R\ttimeoutMs\x12\x1d\n" +
+	"timeout_ms\x18\x06 \x01(\x03R\ttimeoutMs\x12/\n" +
+	"\x11max_output_tokens\x18\a \x01(\x05H\x01R\x0fmaxOutputTokens\x88\x01\x01\x12\x14\n" +
+	"\x05class\x18\b \x01(\tR\x05class\x12\x1d\n" +
 	"\n" +
 	"enc_prompt\x18\t \x01(\fR\tencPromptB\x0e\n" +
-	"\f_temperature\"\x96\x01\n" +
+	"\f_temperatureB\x14\n" +
+	"\x12_max_output_tokens\"\x96\x01\n" +
 	"\x0fInferenceResult\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x1f\n" +

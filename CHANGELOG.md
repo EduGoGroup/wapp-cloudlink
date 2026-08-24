@@ -6,6 +6,50 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-24
+
+### Added
+
+**Dos campos en `InferenceRequest`** (Plan 044 · Ola 1.7): el Cloud gana una perilla
+para acotar el coste de cada inferencia, y una etiqueta para poder mirarlas por separado.
+
+- **`InferenceRequest.max_output_tokens` (campo 7, `optional int32`).** Presupuesto de
+  **salida** de esa inferencia, en tokens. Lo fija el Cloud **por tarea** (P1 ≈ 64,
+  P2/P3 ≈ 512, P4/P5 según su esquema) porque es quien conoce el esquema de la respuesta
+  que espera; el Edge lo aplica como `num_predict` en las opciones del proveedor.
+  **Ausente ⇒ default del Edge** (hoy 256), que es fail-closed hacia el lado barato: si
+  el Cloud calla, se genera poco, no mucho. Es `optional` por la **misma razón que
+  `temperature`** — sin presencia explícita, «quiero 0» y «no dije nada» serían el mismo
+  byte en el cable.
+
+  ⚠️ **Acota, no cura.** Pone un techo a lo que una inferencia puede ocupar la plaza; no
+  promete que la ocupe menos. Medido: una P3 de 293 tokens a 6-12 tok/s siguen siendo
+  **25-50 s** de generación, y ese tiempo no baja por escribir un número aquí. Sirve para
+  que un lote no se pase de lo previsto, no para hacer rápida una petición que es lenta
+  por su tamaño.
+
+- **`InferenceRequest.class` (campo 8, `string`).** Naturaleza declarada de la petición:
+  `"interactivo"` o `"lote"`. **Es SOLO telemetría** — log, heartbeat y etiqueta de
+  serie. Vacío o valor desconocido ⇒ se etiqueta `"interactivo"`, y eso es todo lo que
+  ocurre; nunca es un error.
+
+  🔴 **Prohibido decidir con él**, y la prohibición está escrita en el `.proto`: no elige
+  a quién servir, no entra en el aforo y **no mueve el umbral del breaker**. El porqué es
+  de diseño y no de estilo: con `class` el breaker tendría **dos umbrales fijos en vez de
+  uno**, y seguiría contando como **sana** una petición con `timeout_ms = 10 s` que tardó
+  9,9 s — justo el fallo que existe para detectar. El mecanismo real es el umbral **por
+  petición**, derivado del `timeout_ms` de cada una, y vive en el Edge (ADR-0042).
+
+### Compatibilidad
+
+- **Cambio puramente aditivo.** Los dos campos ocupan los números **7 y 8**, que estaban
+  libres en `InferenceRequest` (el 6 era `timeout_ms` y el 9 es `enc_prompt`, previsto y
+  vacío desde la 0.15.0): no se renumera ni se retira nada. `buf breaking` (regla FILE)
+  contra `main` pasa **sin un solo hallazgo**.
+- Un Edge de `v0.15.0` parsea un `InferenceRequest` con estos campos sin error (los
+  retiene como unknown fields) y se comporta exactamente como hoy: sin
+  `max_output_tokens` aplica su default y sin `class` no había etiqueta que poner.
+
 ## [0.15.0] - 2026-08-24
 
 ### Added

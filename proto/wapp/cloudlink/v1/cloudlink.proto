@@ -441,6 +441,37 @@ message InferenceRequest {
   // turno acotado del Nivel B — ADR-0044). Agotado ⇒ el Edge responde
   // INFERENCE_ERROR_TIMEOUT; colgarse no es una opción. 0 = default del Edge.
   int64 timeout_ms = 6;
+  // Presupuesto de SALIDA de esta inferencia, en tokens. Lo fija el Cloud —y lo
+  // fija POR TAREA, no por Edge— porque es quien conoce el esquema de la respuesta
+  // que espera: una etiqueta de intención (P1) cabe en ~64 tokens, un desglose
+  // estructurado (P2/P3) necesita ~512, y P4/P5 lo que pida su propio esquema. El
+  // Edge lo traduce a `num_predict` en las opciones del proveedor y no lo discute.
+  //
+  // `optional` por la MISMA razón que `temperature` (campo 5): sin presencia
+  // explícita, "quiero 0" y "no dije nada" serían el MISMO byte en el cable.
+  // Ausente ⇒ el Edge aplica su default (hoy 256), que es fail-closed hacia el
+  // lado barato: si el Cloud calla, se genera poco, no mucho.
+  //
+  // ⚠️ ACOTA, NO CURA — y conviene no confundirlo. Este campo impide que una
+  // inferencia ocupe la plaza MÁS de lo previsto; no promete que la ocupe menos.
+  // Medido: una P3 de 293 tokens a 6-12 tok/s son 25-50 s de generación, y ese
+  // tiempo no baja por escribir un número aquí. Sirve para acotar el peor caso de
+  // un lote, no para hacer rápida una petición que es lenta por su tamaño.
+  optional int32 max_output_tokens = 7;
+  // Naturaleza declarada de la petición: "interactivo" (alguien espera al otro
+  // lado de WhatsApp) o "lote" (trabajo de fondo). Es SOLO TELEMETRÍA: línea de
+  // log, heartbeat y etiqueta de serie. Vacío o valor desconocido ⇒ se etiqueta
+  // "interactivo", y eso es todo lo que ocurre — nunca un error.
+  //
+  // 🔴 PROHIBIDO DECIDIR CON ESTE CAMPO. No elige a quién servir, no entra en el
+  // aforo y NO mueve el umbral del breaker. La prohibición es de diseño, no de
+  // estilo: con `class` el breaker tendría dos umbrales FIJOS en vez de uno, y
+  // seguiría contando como SANA una petición con `timeout_ms = 10 s` que tardó
+  // 9,9 s — justo el fallo que existe para detectar. El mecanismo real es el
+  // umbral POR PETICIÓN, derivado del `timeout_ms` de cada una, y vive en el Edge
+  // (ADR-0042: el breaker aprende de la lentitud, no solo de la caída). Este campo
+  // solo dice de qué color pintar la serie.
+  string class = 8;
   // PREVISTO Y HOY VACÍO — el prompt sellado hacia el Edge. Ningún emisor lo
   // puebla y ningún receptor debe exigirlo ni tratar su ausencia como fallo.
   //

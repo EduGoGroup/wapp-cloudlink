@@ -77,7 +77,7 @@ mTLS). El stream multiplexa por `session_id` y correlaciona por `command_id`.
 | `ConfigUpdate` | Push genérico de configuración (ADR-0021): `kind`/`version`/`payload`; primer kind `intents`. |
 | `DiagnosticsRequest` | Petición de diagnóstico bajo demanda (`scope`), ADR-0023. |
 | `UserAuthResponse` | Respuesta única de autenticación del operador (tokens **o** error tipado), ADR-0025. |
-| `InferenceRequest` | Petición de inferencia al proveedor local del Edge (prompt ya construido, `format`, `temperature`, `timeout_ms`), ADR-0045. |
+| `InferenceRequest` | Petición de inferencia al proveedor local del Edge (prompt ya construido, `format`, `temperature`, `timeout_ms`, `max_output_tokens`, `class`), ADR-0045. `max_output_tokens` acota la salida (`num_predict`); `class` es **solo telemetría** y nunca decide a quién servir ni mueve el umbral del breaker. |
 
 **Eventos `EdgeToCloud`** (oneof `payload`):
 
