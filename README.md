@@ -60,7 +60,7 @@ Motivo: el Edge debe importar el cliente generado **cross-repo**, y los paquetes
 con `buf generate` (config en `buf.gen.yaml`, sin managed mode: el `go_package`
 se declara explícito en el `.proto`).
 
-## Frames del contrato (`wapp.cloudlink.v1`, tag `v0.10.0`)
+## Frames del contrato (`wapp.cloudlink.v1`, último tag `v0.14.0`)
 
 Fuente de verdad: `proto/wapp/cloudlink/v1/cloudlink.proto`. Dos servicios:
 `Enrollment.EnrollEdge` (unario, TLS de servidor) y `CloudLink.Connect` (bidi-stream,
@@ -71,24 +71,26 @@ mTLS). El stream multiplexa por `session_id` y correlaciona por `command_id`.
 | Frame | Propósito |
 |---|---|
 | `SendText` | Envío de texto (`to`, `text`). |
-| `SendMedia` | Envío de media (`kind` DOCUMENT/IMAGE, `mime`, `filename`) con `inline` **o** `presigned_url`. |
-| `RunFlowStep` | Paso de flujo opaco (`payload` serializado). |
+| `SendMedia` | Envío de media (`kind` DOCUMENT/IMAGE, `mime`, `filename`) por `presigned_url`. |
 | `LeaseUpdate` | Lease operativo firmado (renovación/revocación, kill-switch). |
 | `Ping` | Keep-alive (`nonce`). |
 | `ConfigUpdate` | Push genérico de configuración (ADR-0021): `kind`/`version`/`payload`; primer kind `intents`. |
 | `DiagnosticsRequest` | Petición de diagnóstico bajo demanda (`scope`), ADR-0023. |
+| `UserAuthResponse` | Respuesta única de autenticación del operador (tokens **o** error tipado), ADR-0025. |
+| `InferenceRequest` | Petición de inferencia al proveedor local del Edge (prompt ya construido, `format`, `temperature`, `timeout_ms`), ADR-0045. |
 
 **Eventos `EdgeToCloud`** (oneof `payload`):
 
 | Frame | Propósito |
 |---|---|
 | `IncomingMessage` | Entrante de negocio; campos sensibles viajan sellados en `enc_payload` (X25519) o en claro sin sobre. |
-| `DeliveryStatus` | Estado de entrega de un saliente. |
 | `Ack` | Acuse de un comando (`acked_command_id`, `ok`, `error`). |
 | `Heartbeat` | Liveness + `lease_counter` + `self_pn`/`self_jid` (anti-self-loop) + `session_state` + `session_health`. Dispara `MarkOnline`. |
 | `Pong` | Respuesta al `Ping`. |
 | `MessageReceipt` | Acuse delivered/read (solo IDs/estado/timestamp; nunca PII). |
 | `DiagnosticsBundle` | Respuesta a `DiagnosticsRequest`: log tail + dump de goroutines + JSON de subsistemas, saneado y truncado en origen. |
+| `UserLoginRequest` / `UserRefreshRequest` / `UserLogoutRequest` | Autenticación del operador del Edge relayada al IAM, ADR-0025. |
+| `InferenceResult` | Respuesta a `InferenceRequest`: salida sellada (`enc_output`) **o** error nombrado (`InferenceError`), ADR-0045. |
 
 **Sub-mensajes y enums clave** (v0.9.0, Plan 031 / ADR-0023):
 
@@ -98,14 +100,25 @@ mTLS). El stream multiplexa por `session_id` y correlaciona por `command_id`.
   zero-knowledge (ADR-0007): jamás llaves, DEK, credenciales ni contenido.
 - `enum WhatsappSocketState`: `UNSPECIFIED` / `CONNECTED` / `CONNECTING` / `DEGRADED` / `DEAD`.
 - `enum SessionState`: `UNSPECIFIED` / `LOGGED_OUT` (zombie).
-- `ClassifiedIntent` (Plan 029 / ADR-0020): clasificación local del Edge
-  (`intent`, `params`, `confidence`, `config_version`); viaja preferentemente sellada
-  dentro de `SensitivePayload.intent`.
 - `SensitivePayload`: bloque sellado (X25519 `SealFor`) de los campos sensibles del
-  entrante (`text`, `push_name`, `from_pn`, `from_lid`, `intent`).
+  entrante (`text`, `push_name`, `from_pn`, `from_lid`).
+- `InferenceOutput` (Plan 044 · Ola 1.6 / ADR-0045): sub-mensaje **sellado** que el Edge
+  marshala hacia `InferenceResult.enc_output`; lleva el `raw_json` crudo del modelo, sin
+  validar ni reformatear (eso es del caller en el Cloud).
+- `enum InferenceError`: `UNSPECIFIED` / `OLLAMA_DOWN` / `BREAKER_OPEN` / `TIMEOUT` /
+  `LEASE_INVALID` / `EDGE_SIN_CAPACIDAD`. Viaja **en claro** y fuera del sobre: no lleva
+  PII y el Cloud debe poder decidir su degradación aunque el sellado sea lo que falló.
 
-Todos los cambios de `v0.9.0` son **aditivos** sobre `v0.8.0` (campos/frames nuevos al
-final, sin renumerar); `buf breaking` (regla FILE) contra `main` pasa sin hallazgos.
+> **Retirados** (`reserved`, número **y** nombre — no reutilizar): `RunFlowStep` (12),
+> `DeliveryStatus` (11) y `SendMedia.inline` (10) el **2026-08-12**, los tres sin haber
+> transportado nunca un byte; `IncomingMessage.intent` (11) y `SensitivePayload.intent`
+> (5) el **2026-08-24**, con el mensaje `ClassifiedIntent` borrado entero (ADR-0045: la
+> clasificación pasa de push a **pull** — el Cloud la pide con `inference_request`).
+
+⚠️ **La Ola 1.6 del Plan 044 ROMPE el contrato a propósito** (alpha, sin compatibilidad
+que preservar — ADR-0045 §Alternativas): `buf breaking` (regla FILE) contra `main` reporta
+los cuatro hallazgos del retiro del intent, y **no se apaciguan**. Los frames de
+inferencia en sí son aditivos (`CloudToEdge` 18, `EdgeToCloud` 20).
 
 ## Compilar
 
