@@ -2082,7 +2082,7 @@ func (x *DiagnosticsBundle) GetSubsystemsJson() string {
 // heredada que alguien tendría que traducir o retirar).
 type InferenceRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
-	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"` // correlación con el Ack y con el InferenceResult de respuesta
+	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"` // correlación con el InferenceResult de respuesta
 	// Sesión objetivo (multiplexado). NORMALMENTE VACÍA: el servicio de inferencia
 	// es del EDGE —un proceso, un Ollama—, no de una sesión de WhatsApp. Se declara
 	// por simetría con DiagnosticsRequest (campo 2) y como trazabilidad de qué

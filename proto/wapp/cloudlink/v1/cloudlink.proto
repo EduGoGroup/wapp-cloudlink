@@ -416,7 +416,7 @@ message DiagnosticsBundle {
 // proveedor (el día que abajo haya otro motor, un campo `think` sería basura
 // heredada que alguien tendría que traducir o retirar).
 message InferenceRequest {
-  string command_id = 1; // correlación con el Ack y con el InferenceResult de respuesta
+  string command_id = 1; // correlación con el InferenceResult de respuesta
   // Sesión objetivo (multiplexado). NORMALMENTE VACÍA: el servicio de inferencia
   // es del EDGE —un proceso, un Ollama—, no de una sesión de WhatsApp. Se declara
   // por simetría con DiagnosticsRequest (campo 2) y como trazabilidad de qué
