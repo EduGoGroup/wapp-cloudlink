@@ -6,6 +6,65 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+### Added
+
+**El par de frames de inferencia** (Plan 044 · Ola 1.6, ADR-0045, REQ-34): el Edge pasa
+a comportarse como un **servidor de inferencia** para el Cloud.
+
+- **`CloudToEdge.inference_request` (campo 18) → `InferenceRequest`.** El Cloud baja el
+  prompt **ya construido** (`prompt`), el formato/JSON Schema esperado (`format`), la
+  temperatura (`temperature`) y el presupuesto de tiempo (`timeout_ms`). El Edge no
+  interpreta ni altera nada: *prompt entra → JSON sale*.
+- **`EdgeToCloud.inference_result` (campo 20) → `InferenceResult`.** Correlacionado por
+  `command_id` con el request (molde exacto de `DiagnosticsRequest`/`DiagnosticsBundle`).
+  Su `oneof result` es o la salida sellada (`enc_output`) o un **error nombrado**
+  (`InferenceError`), nunca las dos y nunca ninguna.
+- **`InferenceOutput`**, sub-mensaje sellado (`envelope.SealFor`) con el `raw_json` crudo
+  del modelo — análogo de `SensitivePayload`, y por la misma razón: sellar exige un
+  mensaje que marshalar.
+- **`enum InferenceError`**: `OLLAMA_DOWN`, `BREAKER_OPEN`, `TIMEOUT`, `LEASE_INVALID`,
+  `EDGE_SIN_CAPACIDAD`. Enum y no string libre porque es un **vocabulario cerrado** que
+  el consumidor mapea uno a uno a motivos de degradación; con string, un valor nuevo o
+  mal escrito abajo se vuelve arriba un motivo desconocido que nadie nota.
+
+**Tres decisiones que el `.proto` documenta y conviene no re-litigar:**
+
+- **`think` NO es un campo.** Es política fija del Edge (`think:false` SIEMPRE): su único
+  valor no-por-defecto degrada la máquina del cliente en órdenes de magnitud (medido: 4 s
+  → 4 minutos), y además es vocabulario de Ollama, no de este contrato.
+- **`temperature` es `optional`.** 0.0 es a la vez el valor que más se va a pedir
+  (determinismo) y el cero del campo: sin presencia explícita, «quiero 0» y «no dije
+  nada» serían el mismo byte en el cable.
+- **El sellado es ASIMÉTRICO, y es un hecho del contrato, no un olvido.** Solo se
+  distribuye `cloud_enc_pubkey`: el Edge sabe cerrar sobres hacia la nube y la nube
+  abrirlos, pero el Edge no tiene par X25519 propio ⇒ **el resultado va sellado y la
+  petición va en claro dentro del mTLS** (mismo criterio que el fallback del Plan 011
+  §10.H). `InferenceRequest.enc_prompt` (campo 9) queda **previsto y vacío** para el día
+  que el Edge tenga llave propia — algo que hoy no está en ninguna ola.
+
+### Removed
+
+⚠️ **CAMBIO QUE ROMPE — a propósito** (alpha, sin compatibilidad que preservar).
+
+**Muere el push de la clasificación** (ADR-0045 §4, D-044.31): se retiran
+`IncomingMessage.intent` (11) y `SensitivePayload.intent` (5), y el mensaje
+`ClassifiedIntent` se **borra entero**. Los dos números y el nombre quedan `reserved`.
+
+- **Por qué entero y no a plazos.** El push estaba muerto y **medido**: el Edge retenía
+  cada entrante 4 s (`WAPP_AGENT_INTENT_WAIT_MS`) esperando una inferencia cuyo p50 real
+  es 8,1 s — de **430 inferencias, UNA** cupo en la ventana, con descartes a 8 ms de
+  llegar la etiqueta. Por estos dos campos **no llegó jamás un intent a la nube**.
+- **Qué lo reemplaza.** El pull: el Cloud pide la clasificación con `inference_request`
+  dentro de su ventana de agregación (45 s), donde sobra tiempo.
+- **Compat durante el despliegue.** El proto se publica antes que el binario del Edge, así
+  que habrá Edges viejos adjuntando todavía el campo 11: el Cloud nuevo lo parsea sin
+  error y lo retiene como *unknown field* (test
+  `TestIncomingMessage_RetiredIntentFromOldEdge`).
+- `buf breaking` (regla FILE) contra `main` reporta **cuatro** hallazgos, todos de este
+  retiro y ninguno de los frames nuevos. **No se apaciguan**; ningún target del Makefile
+  ni del CI corre esa regla.
+
+
 ## [0.14.0] - 2026-08-21
 
 ### Added

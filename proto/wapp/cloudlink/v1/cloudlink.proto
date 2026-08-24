@@ -63,6 +63,11 @@ message CloudToEdge {
     // correlacionada por command_id. El Edge relaya credenciales→IAM; el
     // tenant es implícito del canal mTLS (no viaja en el mensaje).
     UserAuthResponse user_auth_response = 17;
+    // Plan 044 · Ola 1.6 / ADR-0045 (REQ-34): petición de inferencia servida por
+    // el Edge. El Cloud es el ÚNICO orquestador LLM y baja el prompt ya
+    // construido; el Edge no interpreta ni altera nada. Se correlaciona con el
+    // InferenceResult por command_id (patrón DiagnosticsRequest/Bundle).
+    InferenceRequest inference_request = 18;
   }
 }
 
@@ -91,6 +96,10 @@ message EdgeToCloud {
     UserLoginRequest user_login = 17;
     UserRefreshRequest user_refresh = 18;
     UserLogoutRequest user_logout = 19;
+    // Plan 044 · Ola 1.6 / ADR-0045 (REQ-34): resultado de una inferencia servida
+    // por el Edge, correlacionado por command_id con el inference_request que la
+    // pidió. O trae la salida sellada, o un error nombrado; nunca las dos.
+    InferenceResult inference_result = 20;
   }
 }
 
@@ -146,11 +155,17 @@ message IncomingMessage {
   string from_lid = 8; // LID si se conoce
   string addressing_mode = 9; // "pn" | "lid" (diagnóstico)
   bytes enc_payload = 10; // sellado X25519 (SealFor) de un SensitivePayload marshalado, cuando está presente; si va, los planos sensibles (text/push_name/from_pn/from_lid) viajan vacíos
-  // Espejo EN CLARO de la clasificación de intención del Edge (Plan 029/ADR-0020).
-  // SOLO para despliegues SIN sealed transit: cuando enc_payload va presente, la
-  // intención viaja sellada dentro de SensitivePayload.intent y este campo va
-  // vacío. Mismo criterio que text/push_name hoy (plano solo si no hay sobre).
-  ClassifiedIntent intent = 11;
+  // 11 = intent (el sub-mensaje de clasificación local del Plan 029/ADR-0020,
+  // borrado entero de este .proto en el mismo cambio), RETIRADO el 2026-08-24. El push de la
+  // clasificación muere ENTERO, no a plazos (ADR-0045 §4, D-044.31): la
+  // clasificación pasa a PULL y el Cloud la PIDE con inference_request cuando la
+  // necesita, dentro de su ventana de agregación. El push estaba muerto y MEDIDO:
+  // el Edge retenía cada entrante 4 s esperando una inferencia cuyo p50 real es
+  // 8,1 s — de 430 inferencias UNA cupo en la ventana, y por este campo no llegó
+  // JAMÁS un intent a la nube. Reservado —no reutilizar el 11 ni el nombre— para
+  // que ningún Edge viejo interprete otra cosa en ese hueco.
+  reserved 11;
+  reserved "intent";
 }
 
 // Sub-payload de los campos sensibles de IncomingMessage. El Edge lo marshala y
@@ -160,22 +175,15 @@ message SensitivePayload {
   string push_name = 2;
   string from_pn = 3;
   string from_lid = 4;
-  // Clasificación local del Edge (Plan 029/ADR-0020) por el camino normal
-  // (sellado): sus params contienen texto literal del cliente, por eso viaja
-  // aquí dentro del sobre X25519 y no en claro. La nube decide la precedencia.
-  ClassifiedIntent intent = 5;
-}
-
-// Clasificación local de intención hecha por el Edge (Plan 029/ADR-0020). El
-// Cloud decide la precedencia (no confía ciegamente en el Edge). params contiene
-// texto literal del cliente ⇒ este mensaje viaja PREFERENTEMENTE sellado (dentro
-// de SensitivePayload); el espejo en claro de IncomingMessage.intent solo se usa
-// en despliegues sin sealed transit.
-message ClassifiedIntent {
-  string intent = 1; // etiqueta de intención resuelta (p.ej. "pedido", "saludo")
-  map<string, string> params = 2; // parámetros extraídos (pueden contener texto literal del cliente)
-  float confidence = 3; // confianza [0,1] reportada por el clasificador local
-  string config_version = 4; // versión del catálogo de intenciones usado (trazabilidad)
+  // 5 = intent (el mismo sub-mensaje de clasificación local que se retiró del
+  // campo 11 de IncomingMessage), RETIRADO el 2026-08-24 en aquel mismo cambio.
+  // Era el camino "bueno" del push —la clasificación sellada— y muere con él:
+  // bajo pull (ADR-0045 §4, D-044.31) el Edge ya no clasifica por iniciativa
+  // propia, así que no hay nada que adjuntar aquí. La salida del modelo viaja
+  // ahora sellada en su propio frame (InferenceResult.enc_output). No reutilizar
+  // el 5 ni el nombre.
+  reserved 5;
+  reserved "intent";
 }
 
 // Acuse de estado de un saliente (delivered/read). Aditivo (Plan 013): sube por
@@ -377,6 +385,158 @@ message DiagnosticsBundle {
   string log_tail = 2;       // últimas N líneas del ring buffer de logs (ya saneadas, truncadas en origen)
   string goroutine_dump = 3; // volcado de goroutines (runtime.Stack(all=true)), truncado en origen
   string subsystems_json = 4; // snapshot JSON de subsistemas (intent/status y pares); metadatos operativos, no PII
+}
+
+// InferenceRequest: el Cloud pide una inferencia al proveedor LOCAL del Edge
+// (Plan 044 · Ola 1.6, ADR-0045 §2, REQ-34). Baja por CloudToEdge y el Edge
+// responde con un InferenceResult correlacionado por command_id — el mismo molde
+// request/response de DiagnosticsRequest/DiagnosticsBundle.
+//
+// Contrato de conducta: el Edge NO interpreta ni altera nada — "prompt entra →
+// JSON sale". El troceado, los prompts, el orden de las llamadas y la validación
+// viven ENTEROS en el Cloud (ADR-0045 §1), porque afinar un producto LLM es tocar
+// prompts a diario y orquestar abajo exigiría desplegar a la máquina de cada
+// cliente por cada coma. Esto ACOTA al ADR-0005 sin romperlo: el Edge gana la
+// función de SERVIR inferencia, igual que el ADR-0020 le dio la de anotar, y
+// sigue sin decidir negocio (no arma payloads, no calcula precios, no responde a
+// nadie). Servir inferencia es OPERAR: respeta el lease como cualquier orden.
+//
+// El MODELO no viaja en este frame a propósito: lo elige el Edge, porque es
+// propiedad de la máquina del cliente (qué cabe en su RAM, qué tolera su CPU). Un
+// modelo pedido desde la nube sería una orden que el Edge no siempre puede
+// cumplir, y el fallo aparecería como lentitud, no como negativa.
+//
+// Sobre `think`: el control de "thinking" del modelo NO es un campo de este frame
+// — es POLÍTICA FIJA del Edge (`think:false` SIEMPRE cuando el modelo lo soporta,
+// ADR-0045 §5 / Plan 044 · T1.6-2). Dos razones para no darle perilla al Cloud:
+// (1) su único valor no-por-defecto degrada la máquina del cliente en ÓRDENES DE
+// MAGNITUD —medido: precargar sin `think:false` convirtió una inferencia de 4 s
+// en 4 MINUTOS—, así que como campo solo serviría para romper una máquina que no
+// es nuestra; y (2) es vocabulario de Ollama, y este contrato debe sobrevivir al
+// proveedor (el día que abajo haya otro motor, un campo `think` sería basura
+// heredada que alguien tendría que traducir o retirar).
+message InferenceRequest {
+  string command_id = 1; // correlación con el Ack y con el InferenceResult de respuesta
+  // Sesión objetivo (multiplexado). NORMALMENTE VACÍA: el servicio de inferencia
+  // es del EDGE —un proceso, un Ollama—, no de una sesión de WhatsApp. Se declara
+  // por simetría con DiagnosticsRequest (campo 2) y como trazabilidad de qué
+  // conversación originó la pregunta cuando el Cloud lo sabe; vacío NO es un
+  // error y el Edge no debe exigirlo.
+  string session_id = 2;
+  // El prompt YA CONSTRUIDO por el Cloud (sistema + few-shot + texto del cliente,
+  // armado desde intent_configs). El Edge lo entrega al modelo VERBATIM: no lo
+  // recorta, no lo completa y no le añade contexto propio.
+  string prompt = 3;
+  // Formato esperado de la salida: "json" a secas, o un JSON Schema serializado.
+  // Viaja como string OPACO y el Edge lo reenvía verbatim al proveedor sin
+  // parsearlo (parsearlo sería interpretar). Vacío = sin restricción de formato.
+  string format = 4;
+  // Temperatura de muestreo. `optional` A PROPÓSITO: 0.0 es a la vez el valor que
+  // más se va a pedir (determinismo para clasificar) y el cero del campo — sin
+  // presencia explícita, "quiero 0" y "no dije nada" serían el MISMO byte en el
+  // cable y el Edge no podría distinguirlos. Ausente = el Edge aplica su default.
+  optional float temperature = 5;
+  // Presupuesto de tiempo de ESTA inferencia, en milisegundos. Lo fija el Cloud
+  // porque es quien conoce su ventana (los 45 s de agregación del Nivel C, el
+  // turno acotado del Nivel B — ADR-0044). Agotado ⇒ el Edge responde
+  // INFERENCE_ERROR_TIMEOUT; colgarse no es una opción. 0 = default del Edge.
+  int64 timeout_ms = 6;
+  // PREVISTO Y HOY VACÍO — el prompt sellado hacia el Edge. Ningún emisor lo
+  // puebla y ningún receptor debe exigirlo ni tratar su ausencia como fallo.
+  //
+  // (a) Por qué va vacío. El sellado de este contrato es ASIMÉTRICO POR
+  //     CONSTRUCCIÓN: lo único que se distribuye hoy es `cloud_enc_pubkey`
+  //     (EnrollEdgeResponse campo 4), o sea que el Edge sabe CERRAR sobres hacia
+  //     la nube (envelope.SealFor) y la nube ABRIRLOS (envelope.OpenWith), pero
+  //     el Edge NO tiene par X25519 propio ⇒ la nube no puede sellar hacia él.
+  //     Mientras tanto el prompt viaja EN CLARO DENTRO DEL mTLS, con el mismo
+  //     criterio ya aceptado del fallback del Plan 011 §10.H ("mTLS sigue
+  //     protegiendo el canal").
+  // (b) Por qué la asimetría no abre nada nuevo en ESTE extremo. El texto del
+  //     cliente que el prompt lleva dentro YA LO TENÍA el Edge: se lo escribió el
+  //     cliente por WhatsApp momentos antes y fue el Edge quien lo entregó.
+  //     Bajárselo dentro de un prompt no le revela nada que no hubiera visto; y
+  //     lo demás que el prompt lleve (instrucciones, catálogo) es material del
+  //     PROPIO tenant, cuya máquina es este Edge.
+  // (c) Qué haría falta para llenarlo. Dar al Edge un par X25519 propio y publicar
+  //     su pública en el enrolamiento (el simétrico de cloud_enc_pubkey). Eso NO
+  //     está previsto en ninguna ola a día de hoy: el campo existe para que el día
+  //     que se decida no haya que renumerar nada, no porque esté en camino.
+  //
+  // El número va en el rango alto a propósito, para dejar juntos en el rango bajo
+  // los campos de uso diario.
+  bytes enc_prompt = 9;
+}
+
+// InferenceResult: respuesta del Edge a un InferenceRequest (Plan 044 · Ola 1.6,
+// ADR-0045 §2, REQ-34). Sube por EdgeToCloud correlacionado por command_id —
+// molde exacto de DiagnosticsBundle: el campo 1 es el command_id del request que
+// lo originó y NO lleva session_id (el sobre EdgeToCloud ya lo transporta).
+//
+// El oneof `result` copia el molde de UserAuthResponse: o hay salida, o hay error
+// nombrado; NUNCA las dos, NUNCA ninguna. Que la exclusión la imponga el wire y
+// no una convención es deliberado — un consumidor no puede "olvidarse" de mirar
+// el error y quedarse con una salida vacía creyendo que el modelo no dijo nada.
+message InferenceResult {
+  string command_id = 1; // correlación con el InferenceRequest que lo originó
+  oneof result {
+    // Sellado X25519 (envelope.SealFor con cloud_enc_pubkey) de un InferenceOutput
+    // marshalado. Mismo trato que SensitivePayload en IncomingMessage (ADR-0020
+    // §5): la salida del modelo puede contener texto literal del cliente, así que
+    // no viaja en claro. En ESTA dirección sí se puede sellar (ver el porqué en
+    // InferenceRequest.enc_prompt).
+    bytes enc_output = 2;
+    // Error nombrado: por qué NO hay salida. Va EN CLARO y FUERA del sobre a
+    // propósito — no lleva PII (es un vocabulario cerrado, ver el enum) y el Cloud
+    // necesita poder decidir su degradación aunque el sellado sea justamente lo
+    // que falló. Un error dentro del sobre sería ilegible exactamente en el caso
+    // en que más falta hace leerlo.
+    InferenceError error = 3;
+  }
+}
+
+// InferenceOutput: sub-payload SELLADO del InferenceResult (Plan 044 · Ola 1.6).
+// El Edge lo marshala y lo sella (envelope.SealFor) hacia
+// InferenceResult.enc_output; el Cloud lo abre (envelope.OpenWith) y lo
+// desmarshala. Es el análogo de SensitivePayload y existe por lo mismo: sellar
+// exige un mensaje que marshalar, y tenerlo permite añadir mañana campos sellados
+// sin tocar el frame de fuera.
+message InferenceOutput {
+  // El JSON CRUDO tal cual lo devolvió el modelo. El Edge no lo valida, no lo
+  // reformatea y no lo trunca: el parseo, el schema, sanitizeParams y el umbral
+  // son del caller EN EL CLOUD (ADR-0045 §5). Si el modelo devolvió algo que no es
+  // JSON, eso exactamente es lo que debe llegar arriba — un Edge que "arregle" la
+  // forma haría invisible el fallo del prompt, que es lo único que se puede
+  // corregir.
+  string raw_json = 1;
+}
+
+// InferenceError: por qué el Edge no pudo servir una inferencia (Plan 044 · Ola
+// 1.6, ADR-0045 §2, REQ-34).
+//
+// ENUM y no string libre a propósito: es un vocabulario CERRADO que el consumidor
+// mapea uno a uno a motivos de degradación (T1.6-6 escribe la notificación al
+// dueño desde aquí). Con string libre, un valor nuevo —o mal escrito— en el Edge
+// se convierte arriba en un motivo desconocido que nadie nota; el enum obliga a
+// que ampliar el vocabulario sea un cambio de contrato, visible en los DOS
+// extremos. Contraste deliberado con `degraded_reason` de SessionHealth, que sí es
+// string: aquello es diagnóstico para que lo lea un humano, esto es la ENTRADA DE
+// UNA DECISIÓN.
+//
+// Aditivo/no-breaking: los valores nuevos van SIEMPRE al final.
+enum InferenceError {
+  // Sin uso en el cable: cuando no hay error, la rama del oneof es enc_output.
+  // Existe porque proto3 exige un cero y buf lo quiere con este nombre.
+  INFERENCE_ERROR_UNSPECIFIED = 0;
+  INFERENCE_ERROR_OLLAMA_DOWN = 1; // el proveedor local no responde (proceso caído, puerto cerrado, modelo ausente)
+  INFERENCE_ERROR_BREAKER_OPEN = 2; // el breaker del Edge está abierto (ADR-0042): se rechaza SIN intentar, jamás colgarse
+  INFERENCE_ERROR_TIMEOUT = 3; // se agotó el timeout_ms de ESTA petición
+  INFERENCE_ERROR_LEASE_INVALID = 4; // sin lease válido (ADR-0007): servir inferencia es operar, y operar exige lease
+  // El semáforo de concurrencia del Edge rechazó la petición: la máquina del
+  // cliente está saturada (Plan 044 · T1.6-2). SEPARADO de TIMEOUT a propósito —
+  // decirle al dueño "se agotó el tiempo" cuando lo que pasa es que su equipo va
+  // corto es MENTIR SOBRE LA CAUSA, y lo manda a mirar la red en vez del hardware.
+  INFERENCE_ERROR_EDGE_SIN_CAPACIDAD = 5;
 }
 
 // UserLoginRequest: login del operador del Edge contra el IAM de la nube (Plan

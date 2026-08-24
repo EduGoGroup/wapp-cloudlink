@@ -40,14 +40,19 @@ cifrado ni las llaves Signal; esos materiales se quedan solo en el Edge.
 | ADR-0008 | Multi-teléfono: N sesiones por Edge, un solo stream | Todos los mensajes del stream llevan `session_id` |
 | ADR-0003 | Sin broker en el Edge; `outbox` SQLite | El stream puede interrumpirse; el Edge encola y drena al reconectar |
 | ADR-0011 | Auto-actualización firmada | El contrato protobuf debe versionar para compatibilidad con Edges desactualizados |
+| ADR-0045 | La inferencia la orquesta el Cloud; el Edge la sirve | Par `InferenceRequest`/`InferenceResult`; el Edge no interpreta nada; muere el intent adjunto |
 
 ---
 
-## Estructura del contrato gRPC (`wapp.cloudlink.v1`, tag actual `v0.10.0`)
+## Estructura del contrato gRPC (`wapp.cloudlink.v1`, último tag `v0.14.0`)
 
 > El `.proto` **existe y está en vivo** (`proto/wapp/cloudlink/v1/cloudlink.proto`); el
 > código generado se commitea en `gen/` (ver README §«Código generado»). Los cambios se
-> cortan como tags `vX.Y.Z` y son **aditivos** (`buf breaking` contra `main`).
+> cortan como tags `vX.Y.Z` y son **aditivos por defecto** (`buf breaking`, regla FILE,
+> contra `main`). Excepción vigente: la **Ola 1.6 del Plan 044** rompe a propósito (alpha,
+> sin compatibilidad que preservar) al retirar el intent adjunto — cuatro hallazgos de
+> `buf breaking` que **no se apaciguan**. Ningún target del Makefile ni del CI corre esa
+> regla, así que romper aquí es una decisión escrita, no un gate que salte.
 
 ### Servicios
 
@@ -61,21 +66,30 @@ CloudLink.Connect (bidi-stream, mTLS)
   → edge abre una conexión persistente full-duplex
   Comandos cloud→edge (oneof): SendText, SendMedia, LeaseUpdate, Ping,
                                ConfigUpdate (ADR-0021), DiagnosticsRequest (ADR-0023),
-                               UserAuthResponse (ADR-0025)
+                               UserAuthResponse (ADR-0025), InferenceRequest (ADR-0045)
   Eventos edge→cloud (oneof):  IncomingMessage, Ack, Heartbeat, Pong, MessageReceipt,
                                DiagnosticsBundle (ADR-0023), UserLogin/UserRefresh/
-                               UserLogout (ADR-0025)
+                               UserLogout (ADR-0025), InferenceResult (ADR-0045)
 ```
 
 > **Retirados el 2026-08-12** (reserved, ver CHANGELOG): `RunFlowStep` (12),
 > `DeliveryStatus` (11) y `SendMedia.inline` (10). Los tres estaban declarados y ninguno
 > transportó nunca un byte: sin productor en todo el ecosistema. No los reintroduzcas.
+>
+> **Retirado el 2026-08-24** (reserved, ADR-0045): el intent adjunto —
+> `IncomingMessage.intent` (11) y `SensitivePayload.intent` (5)— con el mensaje
+> `ClassifiedIntent` borrado entero. Este SÍ tenía productor, y aun así no entregaba: el
+> Edge retenía cada entrante 4 s esperando una inferencia cuyo p50 real es 8,1 s, así que
+> de 430 inferencias UNA cupo en la ventana y ningún intent llegó jamás a la nube. La
+> clasificación pasa a **pull**: el Cloud la pide con `inference_request`. No lo revivas.
 
 `Heartbeat` adjunta `SessionHealth` (snapshot operativo por sesión, solo metadatos:
 socket, degradación, edad del último entrante, outbox, `binary_version`, uptime) más
 `self_pn`/`self_jid` (anti-self-loop) y `session_state`. `IncomingMessage` puede sellar
-los campos sensibles en `SensitivePayload` (X25519), incluido el `ClassifiedIntent` del
-clasificador local del Edge (ADR-0020). Detalle completo de frames y enums en el README.
+los campos sensibles en `SensitivePayload` (X25519). El par `InferenceRequest` /
+`InferenceResult` (ADR-0045) hace del Edge un **servidor de inferencia** para el Cloud:
+prompt entra → JSON sale, con la salida sellada en `InferenceOutput` y el fallo como
+**error nombrado en claro** (`InferenceError`). Detalle completo de frames en el README.
 
 ### Campos obligatorios en todos los mensajes del stream
 
