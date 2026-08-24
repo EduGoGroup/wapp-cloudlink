@@ -44,7 +44,19 @@ cifrado ni las llaves Signal; esos materiales se quedan solo en el Edge.
 
 ---
 
-## Estructura del contrato gRPC (`wapp.cloudlink.v1`, último tag `v0.14.0`)
+## Estructura del contrato gRPC (`wapp.cloudlink.v1`)
+
+> 🔴 **El último tag NO se escribe aquí — se consulta.** Este encabezado decía «último tag
+> `v0.14.0`» y el 2026-08-24 el repo iba ya por **`v0.16.0`**: dos versiones de retraso en el
+> fichero que lee todo agente que entra. Un dato que caduca solo es una trampa que se rearma
+> sola, así que el número se retira y en su lugar va el comando:
+> ```bash
+> git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags | head -1
+> ```
+> ⚠️ **No uses `git tag | tail`**: ordena lexicográficamente y miente (`v0.15.0 < v0.9.0`; con 17
+> tags devuelve `v0.9.0`). Para cortar una versión, el runbook es
+> `../../docs/runbooks/publicar-repo-de-modulo-unico.md` — este repo **no tiene `release.yml`**:
+> el tag y el GitHub Release van **a mano**.
 
 > El `.proto` **existe y está en vivo** (`proto/wapp/cloudlink/v1/cloudlink.proto`); el
 > código generado se commitea en `gen/` (ver README §«Código generado»). Los cambios se
