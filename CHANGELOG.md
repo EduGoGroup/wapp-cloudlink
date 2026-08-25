@@ -6,6 +6,8 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-24
+
 ### Added
 
 **`Heartbeat.inference_readiness` (campo 6) + `enum InferenceReadiness`** (Plan 044 ·
