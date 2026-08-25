@@ -228,6 +228,67 @@ func (SessionState) EnumDescriptor() ([]byte, []int) {
 	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{3}
 }
 
+// InferenceReadiness: lo que el Edge DICE sobre su capacidad de servir
+// inferencia (Plan 044 · Ola 1.8, D-044.43). Viaja en el Heartbeat (campo 6), en
+// TODOS, no solo cuando cambia: es ESTADO, no transición.
+//
+// ENUM y no bool a propósito: un bool solo tiene dos valores y los dos son un
+// veredicto, así que no queda dónde poner "este Edge no lo dice" — el false de
+// un Edge viejo, que no envía nada, se leería como "no puede" y el Cloud dejaría
+// de calentarlo en silencio. El tercer valor (el cero) es exactamente ese hueco.
+//
+// Aditivo/no-breaking: los valores nuevos van SIEMPRE al final.
+type InferenceReadiness int32
+
+const (
+	// ESTE EDGE NO LO DICE (Edge antiguo que no envía el campo, o que aún no lo
+	// sabe). NUNCA se lee como "no puede servir"/DOWN.
+	InferenceReadiness_INFERENCE_READINESS_UNSPECIFIED InferenceReadiness = 0
+	InferenceReadiness_INFERENCE_READINESS_READY       InferenceReadiness = 1 // el Edge afirma que puede servir inferencia ahora
+	InferenceReadiness_INFERENCE_READINESS_DOWN        InferenceReadiness = 2 // el Edge afirma que NO puede servirla (dicho, no inferido)
+)
+
+// Enum value maps for InferenceReadiness.
+var (
+	InferenceReadiness_name = map[int32]string{
+		0: "INFERENCE_READINESS_UNSPECIFIED",
+		1: "INFERENCE_READINESS_READY",
+		2: "INFERENCE_READINESS_DOWN",
+	}
+	InferenceReadiness_value = map[string]int32{
+		"INFERENCE_READINESS_UNSPECIFIED": 0,
+		"INFERENCE_READINESS_READY":       1,
+		"INFERENCE_READINESS_DOWN":        2,
+	}
+)
+
+func (x InferenceReadiness) Enum() *InferenceReadiness {
+	p := new(InferenceReadiness)
+	*p = x
+	return p
+}
+
+func (x InferenceReadiness) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (InferenceReadiness) Descriptor() protoreflect.EnumDescriptor {
+	return file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[4].Descriptor()
+}
+
+func (InferenceReadiness) Type() protoreflect.EnumType {
+	return &file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[4]
+}
+
+func (x InferenceReadiness) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use InferenceReadiness.Descriptor instead.
+func (InferenceReadiness) EnumDescriptor() ([]byte, []int) {
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{4}
+}
+
 // InferenceError: por qué el Edge no pudo servir una inferencia (Plan 044 · Ola
 // 1.6, ADR-0045 §2, REQ-34).
 //
@@ -289,11 +350,11 @@ func (x InferenceError) String() string {
 }
 
 func (InferenceError) Descriptor() protoreflect.EnumDescriptor {
-	return file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[4].Descriptor()
+	return file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[5].Descriptor()
 }
 
 func (InferenceError) Type() protoreflect.EnumType {
-	return &file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[4]
+	return &file_wapp_cloudlink_v1_cloudlink_proto_enumTypes[5]
 }
 
 func (x InferenceError) Number() protoreflect.EnumNumber {
@@ -302,7 +363,7 @@ func (x InferenceError) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InferenceError.Descriptor instead.
 func (InferenceError) EnumDescriptor() ([]byte, []int) {
-	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{4}
+	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP(), []int{5}
 }
 
 type EnrollEdgeRequest struct {
@@ -1493,8 +1554,25 @@ type Heartbeat struct {
 	// socket de WhatsApp. Frontera zero-knowledge (ADR-0007): SOLO metadatos
 	// operativos; JAMÁS llaves, DEK, credenciales ni contenido de mensajes.
 	SessionHealth *SessionHealth `protobuf:"bytes,5,opt,name=session_health,json=sessionHealth,proto3" json:"session_health,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Plan 044 · Ola 1.8 (D-044.43): lo que ESTE EDGE DICE sobre su capacidad de
+	// servir inferencia (ADR-0045: el Cloud orquesta, el Edge sirve). El Cloud lo
+	// usa para saber a quién precalentar y a quién no molestar.
+	//
+	// ⚠️ Es un campo de ESTADO, no de transición: viaja en TODOS los heartbeats,
+	// no solo cuando cambia.
+	//
+	// 🔴 INFERENCE_READINESS_UNSPECIFIED (el cero) significa "ESTE EDGE NO LO
+	// DICE" — un Edge viejo que no envía el campo, o uno que aún no lo sabe—,
+	// NUNCA "no puede servir"/DOWN. Mismo patrón que worker_taskset (campo 9 de
+	// SessionHealth) e intent_circuit (campo 5): el cero significa "no lo sé",
+	// JAMÁS un veredicto. Leerlo como DOWN dejaría de calentar a toda la flota
+	// vieja sin producir un solo error, que es la forma más cara de fallar.
+	//
+	// Va aquí y NO en SessionHealth a propósito: aquello es salud DERIVADA de
+	// medidas del socket; esto es una AFIRMACIÓN del propio Edge.
+	InferenceReadiness InferenceReadiness `protobuf:"varint,6,opt,name=inference_readiness,json=inferenceReadiness,proto3,enum=wapp.cloudlink.v1.InferenceReadiness" json:"inference_readiness,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Heartbeat) Reset() {
@@ -1560,6 +1638,13 @@ func (x *Heartbeat) GetSessionHealth() *SessionHealth {
 		return x.SessionHealth
 	}
 	return nil
+}
+
+func (x *Heartbeat) GetInferenceReadiness() InferenceReadiness {
+	if x != nil {
+		return x.InferenceReadiness
+	}
+	return InferenceReadiness_INFERENCE_READINESS_UNSPECIFIED
 }
 
 // SessionHealth: snapshot operativo de una sesión del Edge (Plan 031, ADR-0023).
@@ -3161,13 +3246,14 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\x03Ack\x12(\n" +
 	"\x10acked_command_id\x18\x01 \x01(\tR\x0eackedCommandId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xe4\x01\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xbc\x02\n" +
 	"\tHeartbeat\x12#\n" +
 	"\rlease_counter\x18\x01 \x01(\x03R\fleaseCounter\x12\x17\n" +
 	"\aself_pn\x18\x02 \x01(\tR\x06selfPn\x12\x19\n" +
 	"\bself_jid\x18\x03 \x01(\tR\aselfJid\x125\n" +
 	"\x05state\x18\x04 \x01(\x0e2\x1f.wapp.cloudlink.v1.SessionStateR\x05state\x12G\n" +
-	"\x0esession_health\x18\x05 \x01(\v2 .wapp.cloudlink.v1.SessionHealthR\rsessionHealth\"\xd0\n" +
+	"\x0esession_health\x18\x05 \x01(\v2 .wapp.cloudlink.v1.SessionHealthR\rsessionHealth\x12V\n" +
+	"\x13inference_readiness\x18\x06 \x01(\x0e2%.wapp.cloudlink.v1.InferenceReadinessR\x12inferenceReadiness\"\xd0\n" +
 	"\n" +
 	"\rSessionHealth\x12Z\n" +
 	"\x15whatsapp_socket_state\x18\x01 \x01(\x0e2&.wapp.cloudlink.v1.WhatsappSocketStateR\x13whatsappSocketState\x12'\n" +
@@ -3307,7 +3393,11 @@ const file_wapp_cloudlink_v1_cloudlink_proto_rawDesc = "" +
 	"\x1aWHATSAPP_SOCKET_STATE_DEAD\x10\x04*K\n" +
 	"\fSessionState\x12\x1d\n" +
 	"\x19SESSION_STATE_UNSPECIFIED\x10\x00\x12\x1c\n" +
-	"\x18SESSION_STATE_LOGGED_OUT\x10\x01*\xdc\x01\n" +
+	"\x18SESSION_STATE_LOGGED_OUT\x10\x01*v\n" +
+	"\x12InferenceReadiness\x12#\n" +
+	"\x1fINFERENCE_READINESS_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19INFERENCE_READINESS_READY\x10\x01\x12\x1c\n" +
+	"\x18INFERENCE_READINESS_DOWN\x10\x02*\xdc\x01\n" +
 	"\x0eInferenceError\x12\x1f\n" +
 	"\x1bINFERENCE_ERROR_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bINFERENCE_ERROR_OLLAMA_DOWN\x10\x01\x12 \n" +
@@ -3334,87 +3424,89 @@ func file_wapp_cloudlink_v1_cloudlink_proto_rawDescGZIP() []byte {
 	return file_wapp_cloudlink_v1_cloudlink_proto_rawDescData
 }
 
-var file_wapp_cloudlink_v1_cloudlink_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_wapp_cloudlink_v1_cloudlink_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_wapp_cloudlink_v1_cloudlink_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_wapp_cloudlink_v1_cloudlink_proto_goTypes = []any{
 	(MediaKind)(0),             // 0: wapp.cloudlink.v1.MediaKind
 	(ReceiptStatus)(0),         // 1: wapp.cloudlink.v1.ReceiptStatus
 	(WhatsappSocketState)(0),   // 2: wapp.cloudlink.v1.WhatsappSocketState
 	(SessionState)(0),          // 3: wapp.cloudlink.v1.SessionState
-	(InferenceError)(0),        // 4: wapp.cloudlink.v1.InferenceError
-	(*EnrollEdgeRequest)(nil),  // 5: wapp.cloudlink.v1.EnrollEdgeRequest
-	(*EnrollEdgeResponse)(nil), // 6: wapp.cloudlink.v1.EnrollEdgeResponse
-	(*CloudToEdge)(nil),        // 7: wapp.cloudlink.v1.CloudToEdge
-	(*EdgeToCloud)(nil),        // 8: wapp.cloudlink.v1.EdgeToCloud
-	(*SendText)(nil),           // 9: wapp.cloudlink.v1.SendText
-	(*SendMedia)(nil),          // 10: wapp.cloudlink.v1.SendMedia
-	(*LeaseUpdate)(nil),        // 11: wapp.cloudlink.v1.LeaseUpdate
-	(*Ping)(nil),               // 12: wapp.cloudlink.v1.Ping
-	(*IncomingMessage)(nil),    // 13: wapp.cloudlink.v1.IncomingMessage
-	(*SensitivePayload)(nil),   // 14: wapp.cloudlink.v1.SensitivePayload
-	(*MessageReceipt)(nil),     // 15: wapp.cloudlink.v1.MessageReceipt
-	(*Ack)(nil),                // 16: wapp.cloudlink.v1.Ack
-	(*Heartbeat)(nil),          // 17: wapp.cloudlink.v1.Heartbeat
-	(*SessionHealth)(nil),      // 18: wapp.cloudlink.v1.SessionHealth
-	(*InferenceLatency)(nil),   // 19: wapp.cloudlink.v1.InferenceLatency
-	(*Pong)(nil),               // 20: wapp.cloudlink.v1.Pong
-	(*ConfigUpdate)(nil),       // 21: wapp.cloudlink.v1.ConfigUpdate
-	(*DiagnosticsRequest)(nil), // 22: wapp.cloudlink.v1.DiagnosticsRequest
-	(*DiagnosticsBundle)(nil),  // 23: wapp.cloudlink.v1.DiagnosticsBundle
-	(*InferenceRequest)(nil),   // 24: wapp.cloudlink.v1.InferenceRequest
-	(*InferenceResult)(nil),    // 25: wapp.cloudlink.v1.InferenceResult
-	(*InferenceOutput)(nil),    // 26: wapp.cloudlink.v1.InferenceOutput
-	(*UserLoginRequest)(nil),   // 27: wapp.cloudlink.v1.UserLoginRequest
-	(*UserRefreshRequest)(nil), // 28: wapp.cloudlink.v1.UserRefreshRequest
-	(*UserLogoutRequest)(nil),  // 29: wapp.cloudlink.v1.UserLogoutRequest
-	(*UserAuthResponse)(nil),   // 30: wapp.cloudlink.v1.UserAuthResponse
-	(*UserTokens)(nil),         // 31: wapp.cloudlink.v1.UserTokens
-	(*UserAuthError)(nil),      // 32: wapp.cloudlink.v1.UserAuthError
-	nil,                        // 33: wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
-	nil,                        // 34: wapp.cloudlink.v1.SessionHealth.InferenceByRegimeEntry
-	nil,                        // 35: wapp.cloudlink.v1.SessionHealth.InferenceByClassEntry
+	(InferenceReadiness)(0),    // 4: wapp.cloudlink.v1.InferenceReadiness
+	(InferenceError)(0),        // 5: wapp.cloudlink.v1.InferenceError
+	(*EnrollEdgeRequest)(nil),  // 6: wapp.cloudlink.v1.EnrollEdgeRequest
+	(*EnrollEdgeResponse)(nil), // 7: wapp.cloudlink.v1.EnrollEdgeResponse
+	(*CloudToEdge)(nil),        // 8: wapp.cloudlink.v1.CloudToEdge
+	(*EdgeToCloud)(nil),        // 9: wapp.cloudlink.v1.EdgeToCloud
+	(*SendText)(nil),           // 10: wapp.cloudlink.v1.SendText
+	(*SendMedia)(nil),          // 11: wapp.cloudlink.v1.SendMedia
+	(*LeaseUpdate)(nil),        // 12: wapp.cloudlink.v1.LeaseUpdate
+	(*Ping)(nil),               // 13: wapp.cloudlink.v1.Ping
+	(*IncomingMessage)(nil),    // 14: wapp.cloudlink.v1.IncomingMessage
+	(*SensitivePayload)(nil),   // 15: wapp.cloudlink.v1.SensitivePayload
+	(*MessageReceipt)(nil),     // 16: wapp.cloudlink.v1.MessageReceipt
+	(*Ack)(nil),                // 17: wapp.cloudlink.v1.Ack
+	(*Heartbeat)(nil),          // 18: wapp.cloudlink.v1.Heartbeat
+	(*SessionHealth)(nil),      // 19: wapp.cloudlink.v1.SessionHealth
+	(*InferenceLatency)(nil),   // 20: wapp.cloudlink.v1.InferenceLatency
+	(*Pong)(nil),               // 21: wapp.cloudlink.v1.Pong
+	(*ConfigUpdate)(nil),       // 22: wapp.cloudlink.v1.ConfigUpdate
+	(*DiagnosticsRequest)(nil), // 23: wapp.cloudlink.v1.DiagnosticsRequest
+	(*DiagnosticsBundle)(nil),  // 24: wapp.cloudlink.v1.DiagnosticsBundle
+	(*InferenceRequest)(nil),   // 25: wapp.cloudlink.v1.InferenceRequest
+	(*InferenceResult)(nil),    // 26: wapp.cloudlink.v1.InferenceResult
+	(*InferenceOutput)(nil),    // 27: wapp.cloudlink.v1.InferenceOutput
+	(*UserLoginRequest)(nil),   // 28: wapp.cloudlink.v1.UserLoginRequest
+	(*UserRefreshRequest)(nil), // 29: wapp.cloudlink.v1.UserRefreshRequest
+	(*UserLogoutRequest)(nil),  // 30: wapp.cloudlink.v1.UserLogoutRequest
+	(*UserAuthResponse)(nil),   // 31: wapp.cloudlink.v1.UserAuthResponse
+	(*UserTokens)(nil),         // 32: wapp.cloudlink.v1.UserTokens
+	(*UserAuthError)(nil),      // 33: wapp.cloudlink.v1.UserAuthError
+	nil,                        // 34: wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
+	nil,                        // 35: wapp.cloudlink.v1.SessionHealth.InferenceByRegimeEntry
+	nil,                        // 36: wapp.cloudlink.v1.SessionHealth.InferenceByClassEntry
 }
 var file_wapp_cloudlink_v1_cloudlink_proto_depIdxs = []int32{
-	9,  // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
-	10, // 1: wapp.cloudlink.v1.CloudToEdge.send_media:type_name -> wapp.cloudlink.v1.SendMedia
-	11, // 2: wapp.cloudlink.v1.CloudToEdge.lease_update:type_name -> wapp.cloudlink.v1.LeaseUpdate
-	12, // 3: wapp.cloudlink.v1.CloudToEdge.ping:type_name -> wapp.cloudlink.v1.Ping
-	21, // 4: wapp.cloudlink.v1.CloudToEdge.config_update:type_name -> wapp.cloudlink.v1.ConfigUpdate
-	22, // 5: wapp.cloudlink.v1.CloudToEdge.diagnostics_request:type_name -> wapp.cloudlink.v1.DiagnosticsRequest
-	30, // 6: wapp.cloudlink.v1.CloudToEdge.user_auth_response:type_name -> wapp.cloudlink.v1.UserAuthResponse
-	24, // 7: wapp.cloudlink.v1.CloudToEdge.inference_request:type_name -> wapp.cloudlink.v1.InferenceRequest
-	13, // 8: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
-	16, // 9: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
-	17, // 10: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
-	20, // 11: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
-	15, // 12: wapp.cloudlink.v1.EdgeToCloud.receipt:type_name -> wapp.cloudlink.v1.MessageReceipt
-	23, // 13: wapp.cloudlink.v1.EdgeToCloud.diagnostics_bundle:type_name -> wapp.cloudlink.v1.DiagnosticsBundle
-	27, // 14: wapp.cloudlink.v1.EdgeToCloud.user_login:type_name -> wapp.cloudlink.v1.UserLoginRequest
-	28, // 15: wapp.cloudlink.v1.EdgeToCloud.user_refresh:type_name -> wapp.cloudlink.v1.UserRefreshRequest
-	29, // 16: wapp.cloudlink.v1.EdgeToCloud.user_logout:type_name -> wapp.cloudlink.v1.UserLogoutRequest
-	25, // 17: wapp.cloudlink.v1.EdgeToCloud.inference_result:type_name -> wapp.cloudlink.v1.InferenceResult
+	10, // 0: wapp.cloudlink.v1.CloudToEdge.send_text:type_name -> wapp.cloudlink.v1.SendText
+	11, // 1: wapp.cloudlink.v1.CloudToEdge.send_media:type_name -> wapp.cloudlink.v1.SendMedia
+	12, // 2: wapp.cloudlink.v1.CloudToEdge.lease_update:type_name -> wapp.cloudlink.v1.LeaseUpdate
+	13, // 3: wapp.cloudlink.v1.CloudToEdge.ping:type_name -> wapp.cloudlink.v1.Ping
+	22, // 4: wapp.cloudlink.v1.CloudToEdge.config_update:type_name -> wapp.cloudlink.v1.ConfigUpdate
+	23, // 5: wapp.cloudlink.v1.CloudToEdge.diagnostics_request:type_name -> wapp.cloudlink.v1.DiagnosticsRequest
+	31, // 6: wapp.cloudlink.v1.CloudToEdge.user_auth_response:type_name -> wapp.cloudlink.v1.UserAuthResponse
+	25, // 7: wapp.cloudlink.v1.CloudToEdge.inference_request:type_name -> wapp.cloudlink.v1.InferenceRequest
+	14, // 8: wapp.cloudlink.v1.EdgeToCloud.incoming:type_name -> wapp.cloudlink.v1.IncomingMessage
+	17, // 9: wapp.cloudlink.v1.EdgeToCloud.ack:type_name -> wapp.cloudlink.v1.Ack
+	18, // 10: wapp.cloudlink.v1.EdgeToCloud.heartbeat:type_name -> wapp.cloudlink.v1.Heartbeat
+	21, // 11: wapp.cloudlink.v1.EdgeToCloud.pong:type_name -> wapp.cloudlink.v1.Pong
+	16, // 12: wapp.cloudlink.v1.EdgeToCloud.receipt:type_name -> wapp.cloudlink.v1.MessageReceipt
+	24, // 13: wapp.cloudlink.v1.EdgeToCloud.diagnostics_bundle:type_name -> wapp.cloudlink.v1.DiagnosticsBundle
+	28, // 14: wapp.cloudlink.v1.EdgeToCloud.user_login:type_name -> wapp.cloudlink.v1.UserLoginRequest
+	29, // 15: wapp.cloudlink.v1.EdgeToCloud.user_refresh:type_name -> wapp.cloudlink.v1.UserRefreshRequest
+	30, // 16: wapp.cloudlink.v1.EdgeToCloud.user_logout:type_name -> wapp.cloudlink.v1.UserLogoutRequest
+	26, // 17: wapp.cloudlink.v1.EdgeToCloud.inference_result:type_name -> wapp.cloudlink.v1.InferenceResult
 	0,  // 18: wapp.cloudlink.v1.SendMedia.kind:type_name -> wapp.cloudlink.v1.MediaKind
 	1,  // 19: wapp.cloudlink.v1.MessageReceipt.status:type_name -> wapp.cloudlink.v1.ReceiptStatus
 	3,  // 20: wapp.cloudlink.v1.Heartbeat.state:type_name -> wapp.cloudlink.v1.SessionState
-	18, // 21: wapp.cloudlink.v1.Heartbeat.session_health:type_name -> wapp.cloudlink.v1.SessionHealth
-	2,  // 22: wapp.cloudlink.v1.SessionHealth.whatsapp_socket_state:type_name -> wapp.cloudlink.v1.WhatsappSocketState
-	33, // 23: wapp.cloudlink.v1.SessionHealth.intent_omitted_by_reason:type_name -> wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
-	19, // 24: wapp.cloudlink.v1.SessionHealth.inference_prefill:type_name -> wapp.cloudlink.v1.InferenceLatency
-	19, // 25: wapp.cloudlink.v1.SessionHealth.inference_generation:type_name -> wapp.cloudlink.v1.InferenceLatency
-	34, // 26: wapp.cloudlink.v1.SessionHealth.inference_by_regime:type_name -> wapp.cloudlink.v1.SessionHealth.InferenceByRegimeEntry
-	35, // 27: wapp.cloudlink.v1.SessionHealth.inference_by_class:type_name -> wapp.cloudlink.v1.SessionHealth.InferenceByClassEntry
-	4,  // 28: wapp.cloudlink.v1.InferenceResult.error:type_name -> wapp.cloudlink.v1.InferenceError
-	31, // 29: wapp.cloudlink.v1.UserAuthResponse.tokens:type_name -> wapp.cloudlink.v1.UserTokens
-	32, // 30: wapp.cloudlink.v1.UserAuthResponse.error:type_name -> wapp.cloudlink.v1.UserAuthError
-	5,  // 31: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
-	8,  // 32: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
-	6,  // 33: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
-	7,  // 34: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
-	33, // [33:35] is the sub-list for method output_type
-	31, // [31:33] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	19, // 21: wapp.cloudlink.v1.Heartbeat.session_health:type_name -> wapp.cloudlink.v1.SessionHealth
+	4,  // 22: wapp.cloudlink.v1.Heartbeat.inference_readiness:type_name -> wapp.cloudlink.v1.InferenceReadiness
+	2,  // 23: wapp.cloudlink.v1.SessionHealth.whatsapp_socket_state:type_name -> wapp.cloudlink.v1.WhatsappSocketState
+	34, // 24: wapp.cloudlink.v1.SessionHealth.intent_omitted_by_reason:type_name -> wapp.cloudlink.v1.SessionHealth.IntentOmittedByReasonEntry
+	20, // 25: wapp.cloudlink.v1.SessionHealth.inference_prefill:type_name -> wapp.cloudlink.v1.InferenceLatency
+	20, // 26: wapp.cloudlink.v1.SessionHealth.inference_generation:type_name -> wapp.cloudlink.v1.InferenceLatency
+	35, // 27: wapp.cloudlink.v1.SessionHealth.inference_by_regime:type_name -> wapp.cloudlink.v1.SessionHealth.InferenceByRegimeEntry
+	36, // 28: wapp.cloudlink.v1.SessionHealth.inference_by_class:type_name -> wapp.cloudlink.v1.SessionHealth.InferenceByClassEntry
+	5,  // 29: wapp.cloudlink.v1.InferenceResult.error:type_name -> wapp.cloudlink.v1.InferenceError
+	32, // 30: wapp.cloudlink.v1.UserAuthResponse.tokens:type_name -> wapp.cloudlink.v1.UserTokens
+	33, // 31: wapp.cloudlink.v1.UserAuthResponse.error:type_name -> wapp.cloudlink.v1.UserAuthError
+	6,  // 32: wapp.cloudlink.v1.Enrollment.EnrollEdge:input_type -> wapp.cloudlink.v1.EnrollEdgeRequest
+	9,  // 33: wapp.cloudlink.v1.CloudLink.Connect:input_type -> wapp.cloudlink.v1.EdgeToCloud
+	7,  // 34: wapp.cloudlink.v1.Enrollment.EnrollEdge:output_type -> wapp.cloudlink.v1.EnrollEdgeResponse
+	8,  // 35: wapp.cloudlink.v1.CloudLink.Connect:output_type -> wapp.cloudlink.v1.CloudToEdge
+	34, // [34:36] is the sub-list for method output_type
+	32, // [32:34] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_wapp_cloudlink_v1_cloudlink_proto_init() }
@@ -3461,7 +3553,7 @@ func file_wapp_cloudlink_v1_cloudlink_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc), len(file_wapp_cloudlink_v1_cloudlink_proto_rawDesc)),
-			NumEnums:      5,
+			NumEnums:      6,
 			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   2,

@@ -238,6 +238,23 @@ message Heartbeat {
   // socket de WhatsApp. Frontera zero-knowledge (ADR-0007): SOLO metadatos
   // operativos; JAMÁS llaves, DEK, credenciales ni contenido de mensajes.
   SessionHealth session_health = 5;
+  // Plan 044 · Ola 1.8 (D-044.43): lo que ESTE EDGE DICE sobre su capacidad de
+  // servir inferencia (ADR-0045: el Cloud orquesta, el Edge sirve). El Cloud lo
+  // usa para saber a quién precalentar y a quién no molestar.
+  //
+  // ⚠️ Es un campo de ESTADO, no de transición: viaja en TODOS los heartbeats,
+  // no solo cuando cambia.
+  //
+  // 🔴 INFERENCE_READINESS_UNSPECIFIED (el cero) significa "ESTE EDGE NO LO
+  // DICE" — un Edge viejo que no envía el campo, o uno que aún no lo sabe—,
+  // NUNCA "no puede servir"/DOWN. Mismo patrón que worker_taskset (campo 9 de
+  // SessionHealth) e intent_circuit (campo 5): el cero significa "no lo sé",
+  // JAMÁS un veredicto. Leerlo como DOWN dejaría de calentar a toda la flota
+  // vieja sin producir un solo error, que es la forma más cara de fallar.
+  //
+  // Va aquí y NO en SessionHealth a propósito: aquello es salud DERIVADA de
+  // medidas del socket; esto es una AFIRMACIÓN del propio Edge.
+  InferenceReadiness inference_readiness = 6;
 }
 
 // SessionHealth: snapshot operativo de una sesión del Edge (Plan 031, ADR-0023).
@@ -408,6 +425,24 @@ enum WhatsappSocketState {
 enum SessionState {
   SESSION_STATE_UNSPECIFIED = 0; // sin novedad: heartbeat de liveness normal (default/compat)
   SESSION_STATE_LOGGED_OUT = 1; // WhatsApp cerró el device (events.LoggedOut) => zombie
+}
+
+// InferenceReadiness: lo que el Edge DICE sobre su capacidad de servir
+// inferencia (Plan 044 · Ola 1.8, D-044.43). Viaja en el Heartbeat (campo 6), en
+// TODOS, no solo cuando cambia: es ESTADO, no transición.
+//
+// ENUM y no bool a propósito: un bool solo tiene dos valores y los dos son un
+// veredicto, así que no queda dónde poner "este Edge no lo dice" — el false de
+// un Edge viejo, que no envía nada, se leería como "no puede" y el Cloud dejaría
+// de calentarlo en silencio. El tercer valor (el cero) es exactamente ese hueco.
+//
+// Aditivo/no-breaking: los valores nuevos van SIEMPRE al final.
+enum InferenceReadiness {
+  // ESTE EDGE NO LO DICE (Edge antiguo que no envía el campo, o que aún no lo
+  // sabe). NUNCA se lee como "no puede servir"/DOWN.
+  INFERENCE_READINESS_UNSPECIFIED = 0;
+  INFERENCE_READINESS_READY = 1; // el Edge afirma que puede servir inferencia ahora
+  INFERENCE_READINESS_DOWN = 2;  // el Edge afirma que NO puede servirla (dicho, no inferido)
 }
 
 message Pong {
