@@ -6,6 +6,28 @@ como tags `vX.Y.Z` del contrato proto `wapp.cloudlink.v1`.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-24
+
+### Added
+
+**`Heartbeat.inference_readiness` (campo 6) + `enum InferenceReadiness`** (Plan 044 ·
+Ola 1.8, T1.8-4): el Edge **DICE** si puede servir inferencia, en lugar de que el Cloud
+lo deduzca. Es un campo de **ESTADO, no de transición**: viaja en **todos** los
+heartbeats, no solo cuando cambia.
+
+- 🔴 **`INFERENCE_READINESS_UNSPECIFIED` (el cero) significa «este Edge no lo dice»,
+  NUNCA «no puede servir»/DOWN.** Un Cloud que lo leyera como DOWN dejaría de calentar
+  a toda la flota vieja —que no envía el campo— **sin producir un solo error**. Mismo
+  patrón que `SessionHealth.worker_taskset` (campo 9) e `intent_circuit` (campo 5): el
+  cero es «no lo sé», jamás un veredicto.
+- **Enum y no bool a propósito**: un bool solo tiene dos valores y los dos son un
+  veredicto; no queda dónde poner «no lo dice». El tercer valor es ese hueco.
+- **NO va en `SessionHealth`**: aquello es salud **derivada** de medidas del socket;
+  esto es una **afirmación** del propio Edge.
+- Aditivo y no-breaking: número libre (el 6), cero renumeraciones, `buf breaking`
+  verde contra `v0.16.0` y contra `main`. La compatibilidad de wire está cubierta por
+  `TestHeartbeat_InferenceReadiness_OldSenderDecodesUnspecified` y su simétrico forward.
+
 ## [0.16.0] - 2026-08-24
 
 ### Added

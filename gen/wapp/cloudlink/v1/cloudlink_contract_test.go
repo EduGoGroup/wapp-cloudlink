@@ -220,6 +220,91 @@ func TestHeartbeat_OldSenderDecodesInNewShape(t *testing.T) {
 	}
 }
 
+// Criterio (b) de T1.8-4 (Plan 044 · Ola 1.8): un Heartbeat serializado por el
+// proto VIEJO —el previo a inference_readiness, con los campos 1-5— se
+// deserializa con el shape nuevo y da INFERENCE_READINESS_UNSPECIFIED. El
+// mensaje viejo se CONSTRUYE a mano (descriptor dinámico), no se supone: un test
+// que solo instanciara &Heartbeat{} probaría el cero de Go, no el del cable.
+//
+// Lo que protege: que el cero signifique "este Edge no lo dice" y NUNCA "DOWN".
+// Si alguien reordenara el enum y el 0 pasara a ser READY o DOWN, toda la flota
+// vieja —que no envía el campo— quedaría clasificada por accidente.
+func TestHeartbeat_InferenceReadiness_OldSenderDecodesUnspecified(t *testing.T) {
+	oldMD := legacyHeartbeatPreReadinessDescriptor(t)
+	oldMsg := dynamicpb.NewMessage(oldMD)
+	oldMsg.Set(oldMD.Fields().ByName("lease_counter"), protoreflect.ValueOfInt64(23))
+	oldMsg.Set(oldMD.Fields().ByName("self_pn"), protoreflect.ValueOfString("593666666666"))
+	oldMsg.Set(oldMD.Fields().ByName("session_health"), protoreflect.ValueOfBytes([]byte{0x08, 0x01}))
+	wire, err := proto.Marshal(oldMsg)
+	if err != nil {
+		t.Fatalf("marshal oldMsg: %v", err)
+	}
+	// Control del propio test: el emisor viejo NO pudo poner el campo 6 en el cable.
+	if oldMD.Fields().ByNumber(6) != nil {
+		t.Fatalf("el descriptor viejo no debe conocer el campo 6")
+	}
+
+	var out Heartbeat
+	if err := proto.Unmarshal(wire, &out); err != nil {
+		t.Fatalf("el shape nuevo debe parsear un Heartbeat sin inference_readiness: %v", err)
+	}
+	if got := out.GetInferenceReadiness(); got != InferenceReadiness_INFERENCE_READINESS_UNSPECIFIED {
+		t.Errorf("inference_readiness = %v (%d), want INFERENCE_READINESS_UNSPECIFIED (0): "+
+			"un Edge que no lo dice JAMÁS debe leerse como DOWN", got, int32(got))
+	}
+	// Y el cero del cable no es DOWN ni READY: se comprueba explícito, porque es
+	// el error que esta tarea existe para impedir.
+	if out.GetInferenceReadiness() == InferenceReadiness_INFERENCE_READINESS_DOWN {
+		t.Errorf("el silencio de un Edge viejo se leyó como DOWN")
+	}
+	if out.GetInferenceReadiness() == InferenceReadiness_INFERENCE_READINESS_READY {
+		t.Errorf("el silencio de un Edge viejo se leyó como READY")
+	}
+	// Los campos base sobreviven intactos.
+	if out.GetLeaseCounter() != 23 || out.GetSelfPn() != "593666666666" {
+		t.Errorf("campos base = %d/%q, want 23/593666666666", out.GetLeaseCounter(), out.GetSelfPn())
+	}
+	if out.GetSessionHealth().GetWhatsappSocketState() != WhatsappSocketState_WHATSAPP_SOCKET_STATE_CONNECTED {
+		t.Errorf("session_health del emisor viejo perdido: %v", out.GetSessionHealth())
+	}
+}
+
+// Simétrico de (b): un receptor que NO conoce inference_readiness (campo 6)
+// parsea un Heartbeat nuevo SIN error y retiene el campo como unknown. Calca a
+// TestHeartbeat_SessionHealth_ForwardCompatOldReceiver: durante el despliegue de
+// la Ola 1.8 habrá Edges nuevos hablando con consumidores viejos.
+func TestHeartbeat_InferenceReadiness_ForwardCompatOldReceiver(t *testing.T) {
+	newMsg := &Heartbeat{
+		LeaseCounter:       31,
+		SelfPn:             "593555555555",
+		InferenceReadiness: InferenceReadiness_INFERENCE_READINESS_READY,
+	}
+	wire, err := proto.Marshal(newMsg)
+	if err != nil {
+		t.Fatalf("marshal newMsg: %v", err)
+	}
+	legacyMD := legacyHeartbeatPreReadinessDescriptor(t)
+	legacy := dynamicpb.NewMessage(legacyMD)
+	if err := proto.Unmarshal(wire, legacy); err != nil {
+		t.Fatalf("un receptor viejo no debe fallar al parsear inference_readiness: %v", err)
+	}
+	if got := legacy.Get(legacyMD.Fields().ByName("lease_counter")).Int(); got != 31 {
+		t.Errorf("lease_counter base perdido: %d", got)
+	}
+	if len(legacy.GetUnknown()) == 0 {
+		t.Errorf("inference_readiness debía retenerse como unknown field, no vacío")
+	}
+	// Y el roundtrip completo en el shape nuevo conserva el valor: sin esto, el
+	// test de arriba pasaría también con un getter que devolviera siempre el cero.
+	var out Heartbeat
+	if err := proto.Unmarshal(wire, &out); err != nil {
+		t.Fatalf("unmarshal Heartbeat nuevo: %v", err)
+	}
+	if out.GetInferenceReadiness() != InferenceReadiness_INFERENCE_READINESS_READY {
+		t.Errorf("inference_readiness = %v, want READY", out.GetInferenceReadiness())
+	}
+}
+
 func TestDiagnosticsRequest_Roundtrip(t *testing.T) {
 	in := &CloudToEdge{
 		CommandId: "diag-1",
@@ -545,6 +630,41 @@ func legacyHeartbeatDescriptor(t *testing.T) protoreflect.MessageDescriptor {
 	fd, err := protodesc.NewFile(fdp, nil)
 	if err != nil {
 		t.Fatalf("construir descriptor legacy Heartbeat: %v", err)
+	}
+	return fd.Messages().Get(0)
+}
+
+// legacyHeartbeatPreReadinessDescriptor construye el Heartbeat previo a la Ola
+// 1.8 del Plan 044: los campos 1-5 (lease_counter/self_pn/self_jid/state/
+// session_health) SIN el campo 6 (inference_readiness). session_health se
+// declara `bytes` porque en el cable un sub-mensaje y unos bytes son la misma
+// cosa (length-delimited), y así el descriptor no arrastra todo SessionHealth
+// (mismo truco que legacyIncomingMessageWithIntentDescriptor con el intent).
+func legacyHeartbeatPreReadinessDescriptor(t *testing.T) protoreflect.MessageDescriptor {
+	t.Helper()
+	i64 := descriptorpb.FieldDescriptorProto_TYPE_INT64
+	str := descriptorpb.FieldDescriptorProto_TYPE_STRING
+	i32 := descriptorpb.FieldDescriptorProto_TYPE_INT32
+	byt := descriptorpb.FieldDescriptorProto_TYPE_BYTES
+	lbl := descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL
+	fdp := &descriptorpb.FileDescriptorProto{
+		Name:    new("legacy_heartbeat_pre_readiness.proto"),
+		Syntax:  new("proto3"),
+		Package: new("wapp.cloudlink.legacy"),
+		MessageType: []*descriptorpb.DescriptorProto{{
+			Name: new("Heartbeat"),
+			Field: []*descriptorpb.FieldDescriptorProto{
+				{Name: new("lease_counter"), Number: new(int32(1)), Type: &i64, Label: &lbl, JsonName: new("leaseCounter")},
+				{Name: new("self_pn"), Number: new(int32(2)), Type: &str, Label: &lbl, JsonName: new("selfPn")},
+				{Name: new("self_jid"), Number: new(int32(3)), Type: &str, Label: &lbl, JsonName: new("selfJid")},
+				{Name: new("state"), Number: new(int32(4)), Type: &i32, Label: &lbl, JsonName: new("state")},
+				{Name: new("session_health"), Number: new(int32(5)), Type: &byt, Label: &lbl, JsonName: new("sessionHealth")},
+			},
+		}},
+	}
+	fd, err := protodesc.NewFile(fdp, nil)
+	if err != nil {
+		t.Fatalf("construir descriptor legacy Heartbeat pre-readiness: %v", err)
 	}
 	return fd.Messages().Get(0)
 }
