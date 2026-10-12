@@ -4,7 +4,7 @@
 //
 // IMPLEMENTACIÓN DE REFERENCIA / DEMO — no es el servidor de producción.
 // El servidor CloudLink real que terminan los Edges vive en la Plataforma Cloud
-// (repo wapp-cloud-platform, paquete internal/gateway/grpc): ahí están el mTLS
+// (repo wapp-cloud-platform, paquete internal/modulos/edge/grpc): ahí están el mTLS
 // estricto, el fleet, la persistencia de leases y los dos listeners. Este
 // paquete existe para (a) validar el contrato proto extremo a extremo, (b) los
 // arneses e2e de esta pieza (cmd/cloudlink, cmd/democloud) y (c) servir de

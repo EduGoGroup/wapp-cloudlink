@@ -8,7 +8,7 @@ más una **implementación de referencia** del servidor gRPC del lado cloud.
 
 `internal/server` es una **implementación de referencia / demo**, no el servidor
 de producción. El servidor CloudLink real que terminan los Edges vive en la
-**Plataforma Cloud** (`wapp-cloud-platform`, paquete `internal/gateway/grpc`):
+**Plataforma Cloud** (`wapp-cloud-platform`, paquete `internal/modulos/edge/grpc`):
 ahí están el mTLS estricto, el fleet, la persistencia de leases y los dos
 listeners. La Plataforma **no importa** este paquete —tiene su propia
 implementación— y por eso `internal/server` vive bajo `internal/` a propósito:

@@ -150,7 +150,7 @@ afirma tres veces que `lease` y `mtls` ya viven en `internal/`; es **falso**, y 
 
 `internal/server/` es implementación de **referencia y demo** (`internal/server/server.go:5-13`).
 El servidor CloudLink que terminan los Edges reales vive en `wapp-cloud-platform`, paquete
-`internal/gateway/grpc`. Vive bajo `internal/` precisamente para que la barrera la imponga el
+`internal/modulos/edge/grpc`. Vive bajo `internal/` precisamente para que la barrera la imponga el
 compilador.
 
 - **Cómo se comprueba**: `grep -rn "wapp-cloudlink/internal" --include='*.go'` en los dos
@@ -190,7 +190,8 @@ no tiene certificado, y por eso esa puerta sirve **solo** el canje del código d
 
 - **Cómo se comprueba**: `grep -n "RequireAndVerifyClientCert\|VersionTLS13" mtls/mtls.go`.
 - **Candado**: `mtls/mtls_test.go:138 TestMTLSConnect` (aquí) y una batería mucho mayor en
-  `wapp-cloud-platform` (`internal/gateway/grpc/mtls_test.go`, con el rechazo de cert ajeno).
+  `wapp-cloud-platform` (`internal/modulos/edge/grpc/connect_identity_test.go` para la identidad, y
+  `test/procesos/pki_selftest_tls_test.go` con el rechazo de cert ajeno).
 
 ### INV-8 · El código de activación es de UN SOLO USO, y la transición ocurre bajo el mismo lock
 
